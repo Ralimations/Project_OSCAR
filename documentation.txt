@@ -1,0 +1,116 @@
+Project O.S.C.A.R. Documentation Timeline
+=======================================
+
+2026-04-08 - Phase 1 foundation started
+- Created the baseline OSCAR project structure from the PRD.
+- Added .env placeholders for local model paths.
+- Added config files for runtime settings, gesture thresholds, prompt rules, and app macros.
+- Added core module placeholders for brain, vision, ears, voice, and memory.
+- Added actions layer with a threaded ActionController and active-window lookup wrapper.
+- Added main orchestrator skeleton with dormant, routing, reasoning, cleanup, and shutdown states.
+
+2026-04-08 - Dormant-state gesture loop established
+- Implemented core gesture math in core/eyes.py.
+- Added pinch-to-click logic.
+- Added two-finger vertical movement to scroll mapping.
+- Added head nod and head shake confirmation interpretation in the pure logic path.
+- Added cooldown handling so repeated gestures do not flood the action queue.
+- Added low-complexity MediaPipe hand detection hook for the live camera path.
+
+2026-04-08 - Non-blocking action execution added
+- Implemented queue-based async action dispatch in actions/controller.py.
+- Added support for click, scroll, key press, hotkey, app launch, and text entry actions.
+- Kept PyAutoGUI optional so the codebase can still load without the package installed.
+
+2026-04-08 - Validation and test scaffolding added
+- Added unit tests for gesture interpretation.
+- Added unit tests for the threaded action controller.
+- Added unit tests for strict JSON extraction and validation in core/brain.py.
+- Added tests package initialization for stable unittest discovery.
+
+2026-04-08 - Current phase status before latest change
+- Completed phase 1 foundation.
+- Remaining gap: wake-word/audio routing is still a stub.
+- Remaining gap: app-specific macros are configured but not yet connected to transcript handling.
+- Remaining gap: LLM, VLM, Screenpipe, and Piper are intentionally deferred to later phases.
+
+2026-04-08 - Phase 2 in progress
+- Starting wake-word event routing and transcript injection scaffolding.
+- Connecting active-window macro lookup so simple commands can execute immediately without loading the LLM.
+- Preserving the orchestrator pattern so the eyes loop pauses during wake-word handling and resumes after cleanup.
+
+2026-04-08 - Phase 2 routing foundation completed
+- Replaced the ears stub with a queue-based transcript event worker in core/ears.py.
+- Added transcript injection support so wake-word and STT integration can be tested before the real backend is installed.
+- Updated the orchestrator so transcript events pause the vision loop, route commands, and restore dormant mode.
+- Added active-window-aware macro resolution for direct command execution from app_macros.json.
+- Added a fallback branch that preserves future LLM routing when no direct macro match exists.
+- Added tests for macro resolution and transcript delivery.
+
+Current project status
+- Phase 1 foundation is complete.
+- Phase 2 direct transcript-to-macro routing is complete.
+- Real wake-word inference, Faster-Whisper transcription, Screenpipe retrieval, Moondream visual routing, Piper speech, and Llama planning are still pending.
+- Runtime test execution is still blocked by the machine's Python launcher access issue.
+
+2026-04-08 - Local Python runtime repaired for development
+- Verified the system py launcher remained bound to blocked WindowsApps executables.
+- Installed a self-contained Python 3.13.12 runtime into tools/python313.
+- Updated python313._pth so the embedded runtime can import the Project_OSCAR workspace.
+- Bootstrapped pip inside the local runtime and installed PyYAML.
+- Verified the local runtime can execute the test suite successfully.
+
+2026-04-08 - Deterministic transcript routing expanded
+- Added core/router.py for cheap offline transcript routing before future LLM fallback.
+- Added direct "open <app>" parsing for immediate application launch commands.
+- Added direct "open <app> and <task>" parsing that builds ordered action sequences.
+- Extended the action controller with sequence and wait actions for multi-step execution.
+- Wired the orchestrator to prefer direct routes first, then active-window macros, then future LLM fallback.
+- Added tests for sequence execution and direct transcript routing.
+
+Current verified test status
+- 12 tests passing with the embedded local runtime.
+
+2026-04-08 - Full PRD module surface added
+- Replaced the remaining placeholder modules with concrete offline-local runtime components.
+- Expanded core/brain.py with heuristic route classification, strict JSON enforcement, and fallback planning.
+- Expanded core/memory.py with schema-tolerant Screenpipe SQLite OCR lookup logic.
+- Expanded core/vision.py with tactical screenshot capture and temporary image cleanup.
+- Expanded core/voice.py with a Piper subprocess wrapper and text fallback.
+- Expanded core/ears.py with openWakeWord and Faster-Whisper loading seams plus transcript injection and audio-file transcription hooks.
+
+2026-04-08 - Orchestrator loop aligned to the PRD
+- Wired main.py through direct transcript routing, active-window macro routing, memory retrieval, vision retrieval, brain planning, sanitization, execution, and cleanup.
+- Registered speak actions in the action controller so planned speech can be executed through the voice layer.
+- Preserved the dormant-to-routing-to-reasoning-to-cleanup state pattern while ensuring Eyes pauses and resumes correctly.
+- Kept heavy model backends optional at runtime so the architecture is present even before the final model weights are installed and tuned.
+
+2026-04-08 - Config and dependency surface updated
+- Expanded settings.yaml with Screenpipe, Piper, wake-word, Whisper, and model path settings.
+- Expanded requirements.txt to include openwakeword, faster-whisper, and Pillow alongside the existing desktop-control and vision dependencies.
+
+2026-04-08 - Test and verification status after PRD wiring
+- Added reasoning and memory tests covering route selection, macro priority, JSON sequence validation, and OCR database lookup.
+- Fixed a real SQLite connection-lifetime bug in core/memory.py discovered during Windows test execution.
+- Verified the expanded codebase with the embedded interpreter using unittest discovery.
+- Current result: 17 tests passing.
+
+Current next-day focus
+- Install the remaining runtime dependencies into the local embedded interpreter.
+- Validate real openWakeWord, Faster-Whisper, MediaPipe, PyAutoGUI, and Piper behavior on the target laptop.
+- Debug end-to-end latency, model loading, camera availability, and Windows automation edge cases.
+
+2026-04-08 - Embedded runtime dependencies installed
+- Installed setuptools and wheel into the embedded Python to support source-package builds.
+- Installed the OSCAR dependency set into tools/python313, including MediaPipe, OpenCV, PyAutoGUI, PyWin32, openwakeword, Faster-Whisper, and Pillow.
+- Verified the embedded runtime can import the key PRD-facing packages successfully.
+- Re-ran the full test suite after installation and kept the result green.
+
+Current runtime verification
+- Embedded interpreter path: tools/python313/python.exe
+- Key imports verified: mediapipe, cv2, pyautogui, yaml, win32gui, openwakeword, faster_whisper, PIL
+- Current result: 17 tests passing after dependency installation.
+
+2026-04-08 - Usage documentation added
+- Added usage_guide.txt with the current control list, supported features, routing behavior, configuration points, and usage examples.
+- Documented both what is already implemented and what still requires real-world runtime debugging.

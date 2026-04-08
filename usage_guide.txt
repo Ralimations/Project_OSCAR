@@ -1,0 +1,185 @@
+Project O.S.C.A.R. Usage Guide
+==============================
+
+What OSCAR Is
+-------------
+OSCAR is an offline desktop assistant designed around a state-machine loop.
+It listens for gesture events and transcript events, routes the request, then executes an OS action or speaks a response.
+
+Current Control Methods
+-----------------------
+1. Hand pinch gesture
+- Thumb tip and index tip close together triggers a click.
+- This maps to a mouse click action.
+
+2. Two-finger vertical gesture
+- Index tip and middle tip moving vertically triggers scrolling.
+- Up and down movement maps to mouse wheel scroll values.
+
+3. Head confirmation gestures
+- Head nod maps to "yes".
+- Head shake maps to "no".
+- These are recognized in the gesture interpreter logic, but they are not yet fully consumed by a live approval workflow.
+
+4. Transcript or wake-word path
+- OSCAR accepts transcript events through the Ears module.
+- The real wake-word and STT model loading seams exist.
+- The current codebase can process injected transcript events and transcribed audio-file results.
+
+Current Supported Features
+--------------------------
+1. Direct app launch commands
+- Example: "open notepad"
+- OSCAR routes this directly without using the brain route.
+
+2. Direct app launch plus follow-up task
+- Example: "open brave and watch the trailer for dune 3"
+- OSCAR builds an action sequence:
+- open app
+- wait briefly
+- focus address bar
+- type search text
+- press enter
+
+3. Window-specific macros
+- OSCAR checks the active window title and looks for matching app macros.
+- Current configured macros:
+- BandLab: "start recording" -> presses R
+- Brave: "focus address bar" -> sends Ctrl+L
+
+4. OCR memory route
+- Transcript requests that look historical or text-retrieval oriented are routed to the local OCR database path.
+- Example intent: "What was that email address?"
+- OSCAR queries the local SQLite database configured for Screenpipe-style OCR logs.
+
+5. Visual route
+- Transcript requests that look visual are routed to the Vision module.
+- Example intent: "Where is the submit button?"
+- OSCAR captures a tactical screenshot, passes it to the visual backend seam, and deletes the temporary image after use.
+
+6. Brain route
+- If the request is not a direct route, macro route, memory route, or vision route, OSCAR falls back to the Brain module.
+- The Brain enforces strict JSON output before actions are executed.
+- Current fallback behavior supports simple speak/open behavior and safe rejection.
+
+7. Voice output
+- OSCAR can dispatch a "speak" action.
+- If Piper is configured and available, it can speak through the Piper subprocess path.
+- If Piper is not available, OSCAR falls back to text output.
+
+8. Non-blocking action execution
+- Actions run through a threaded action controller so they do not block the main orchestrator loop.
+- Supported action types:
+- click
+- scroll
+- press_key
+- hotkey
+- open_app
+- write_text
+- wait
+- sequence
+- speak
+
+How OSCAR Works
+---------------
+1. Dormant state
+- Eyes runs continuously and watches for gesture input.
+- Ears is available for transcript or wake-word-driven flow.
+
+2. Trigger
+- A gesture triggers an immediate action dispatch.
+- A transcript event pauses Eyes and starts the routing path.
+
+3. Routing order
+- Direct command router first
+- App macro router second
+- Brain route decision third
+
+4. Context gathering
+- Memory route -> OCR database lookup
+- Vision route -> screenshot-based visual query
+- Brain route -> direct plan without external context
+
+5. Planning and sanitization
+- Brain builds or receives a JSON action plan.
+- JSON is sanitized before execution.
+
+6. Execution
+- The action controller executes the final action asynchronously.
+
+7. Cleanup
+- Eyes resumes.
+- OSCAR returns to dormant state.
+
+How To Use It
+-------------
+1. Start the project from the project root
+- Use the embedded interpreter:
+- .\tools\python313\python.exe main.py
+
+2. Use gesture control
+- Present a hand to the camera.
+- Pinch thumb and index finger to click.
+- Move index and middle finger vertically to scroll.
+
+3. Use transcript-driven control
+- The codebase currently supports transcript injection through the Ears module.
+- Once the live audio path is finalized, the same route will be used for wake-word + speech input.
+
+4. Example commands
+- "open notepad"
+- "open brave and watch the trailer for dune 3"
+- "start recording" while BandLab is the active window
+- "focus address bar" while Brave is the active window
+- "What was that email address?"
+- "Where is the submit button?"
+- "say hello"
+
+Configuration Files
+-------------------
+1. config/settings.yaml
+- Runtime settings
+- Gesture thresholds
+- Screenpipe database path
+- Piper executable and model path
+- Wake-word and Whisper model paths
+
+2. config/app_macros.json
+- App-specific macro mappings
+
+3. config/gestures.json
+- Gesture thresholds and landmark mapping reference
+
+4. config/prompt_template.txt
+- Brain prompt rules and strict JSON response contract
+
+Known Current Limits
+--------------------
+1. Real live microphone capture and continuous wake-word audio streaming are not fully wired end-to-end yet.
+2. The visual route has screenshot capture and cleanup, but no live VLM backend is configured by default.
+3. The brain route has strict planning logic, but no real local LLM backend is attached by default.
+4. Head nod and head shake are recognized in logic, but not yet used in a full confirmation UX flow.
+5. Piper speech depends on a valid local Piper executable and model path.
+6. OCR memory retrieval depends on a valid local SQLite OCR database at the configured path.
+
+Quick Reality Check
+-------------------
+What exists now:
+- Full orchestrator structure
+- Gesture loop
+- Transcript routing
+- Direct commands
+- App macros
+- OCR route
+- Vision route seam
+- Brain route seam
+- Voice route seam
+- Dependency-ready embedded runtime
+
+What still needs real-world debugging:
+- Model weight paths
+- Microphone and wake-word streaming
+- Faster-Whisper runtime performance
+- Camera behavior on the target laptop
+- Automation edge cases on Windows
+- End-to-end latency tuning

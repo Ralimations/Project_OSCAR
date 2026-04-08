@@ -5,6 +5,7 @@
 venv/
 env/
 ENV/
+tools/python313/
 
 # Python
 __pycache__/

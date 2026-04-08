@@ -1,0 +1,14 @@
+{
+  "BandLab": {
+    "start_recording": {
+      "action": "press_key",
+      "value": "r"
+    }
+  },
+  "Brave": {
+    "focus_address_bar": {
+      "action": "hotkey",
+      "value": ["ctrl", "l"]
+    }
+  }
+}

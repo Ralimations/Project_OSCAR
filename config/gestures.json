@@ -1,0 +1,22 @@
+{
+  "click": {
+    "type": "pinch",
+    "thumb_tip": 4,
+    "index_tip": 8,
+    "distance_threshold": 0.045
+  },
+  "scroll": {
+    "type": "two_finger_vertical",
+    "index_tip": 8,
+    "middle_tip": 12,
+    "deadzone": 0.03
+  },
+  "confirm_yes": {
+    "type": "head_nod",
+    "pitch_threshold": 12.0
+  },
+  "confirm_no": {
+    "type": "head_shake",
+    "yaw_threshold": 18.0
+  }
+}
