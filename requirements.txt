@@ -1,8 +1,8 @@
+huggingface_hub
+transformers>=5.5.1
+torch
+accelerate
 mediapipe
-opencv-python
-pyautogui
-pyyaml
-pywin32
 openwakeword
-faster-whisper
-Pillow
+sounddevice
+pyautogui

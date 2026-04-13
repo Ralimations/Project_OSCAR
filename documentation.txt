@@ -114,3 +114,101 @@ Current runtime verification
 2026-04-08 - Usage documentation added
 - Added usage_guide.txt with the current control list, supported features, routing behavior, configuration points, and usage examples.
 - Documented both what is already implemented and what still requires real-world runtime debugging.
+
+2026-04-08 - Runtime startup hardening
+- Patched core/ears.py so missing local wake-word and Whisper model paths no longer trigger invalid initialization or remote model downloads.
+- Enforced local-only Faster-Whisper loading to respect the project's offline requirement.
+- Patched core/eyes.py so MediaPipe wheels without the legacy solutions API no longer crash the gesture thread; OSCAR now logs a warning and idles that path safely.
+- Re-verified the test suite and a short main.py startup smoke run after the hardening changes.
+
+2026-04-08 - Local model folders populated
+- Implemented scripts/download_models.py to fetch real local wake-word and Faster-Whisper assets into the models directory.
+- Downloaded a working openWakeWord ONNX wake-word model plus required feature models into models/openwakeword.
+- Downloaded the Faster-Whisper tiny local model into models/faster-whisper-tiny.
+- Verified both wake-word and Whisper loaders initialize successfully from local files.
+- Updated .gitignore to keep downloaded model assets out of version control.
+
+2026-04-08 - MediaPipe gesture path migrated to Tasks API
+- Replaced the broken legacy mediapipe.solutions hand path with MediaPipe Tasks HandLandmarker usage in core/eyes.py.
+- Added a hand landmarker task model path to settings.yaml and wired it into the Eyes runtime.
+- Downloaded models/mediapipe/hand_landmarker.task for the installed MediaPipe package.
+- Verified the HandLandmarker initializes successfully with the embedded runtime.
+- Re-ran the full test suite after the gesture-path migration and kept the result green.
+
+2026-04-08 - Startup diagnostics banner added
+- Added startup subsystem diagnostics to main.py so launch logs now report the active interpreter and readiness state of the wake-word, whisper, gesture, vision, voice, and action layers.
+- Added small readiness helpers to Eyes, Ears, Vision, and Voice to support explicit startup visibility instead of inferring health from failure logs.
+- Re-verified the test suite after adding the diagnostics hooks.
+
+2026-04-08 - Development review windows added
+- Added core/dev_overlay.py to render a live tracking window and a sandbox preview window during development.
+- Wired Eyes to publish annotated tracking frames and hand landmark positions into the development overlay.
+- Wired ActionController to support sandbox-only dry-run execution while still showing action events in the sandbox window.
+- Added runtime flags in settings.yaml for development_mode, show_tracking_window, show_sandbox_window, and sandbox_actions_only.
+- Re-verified the full test suite after adding the development harness.
+
+2026-04-08 - Startup calibration gate added
+- Added a calibration sequence in core/eyes.py that must complete before live gesture actions are dispatched.
+- Required startup sequence is now: open hand with 5 visible fingers, nod yes, shake no/disagree, then tilt head for a questioning pose.
+- Added a MediaPipe FaceLandmarker path and local face_landmarker.task model to support head calibration.
+- Extended the development overlay to display the active calibration step and completed steps.
+- Re-verified the suite after the calibration gate changes.
+
+2026-04-08 - Left/right camera mapping corrected
+- Added a mirror_camera runtime flag and enabled it by default.
+- Updated core/eyes.py to process mirrored frames so user movement matches natural left/right expectations in the tracking and sandbox windows.
+- Re-verified the full test suite after the mirror fix.
+
+2026-04-08 - Face tracking visibility and head calibration improved
+- Extended the development tracking window to draw face landmark dots and display live pitch, yaw, and roll values.
+- Changed yes/no/question calibration from absolute head-angle checks to movement relative to a neutral baseline pose.
+- This prevents the old behavior where calibration could default to "yes" from a static face angle instead of a deliberate nod motion.
+- Re-verified the full test suite after the head-calibration refinement.
+
+2026-04-08 - Head calibration simplified to yes/no only
+- Removed the tilt/question calibration step for now.
+- Changed head calibration to require repeated strong motion: two clear vertical swings for yes and two clear horizontal swings for no.
+- Kept baseline-relative motion detection so the head steps do not complete from a resting face angle.
+- Re-verified the full test suite after the simplification.
+
+2026-04-08 - Live audio ingress scaffold added
+- Expanded core/ears.py with an optional live microphone capture loop using sounddevice.
+- Added wake-word-triggered utterance capture and temporary WAV transcription flow into the existing Faster-Whisper path.
+- Added audio settings to settings.yaml and sounddevice to requirements.txt.
+- Added tests for new Ears diagnostics and audio-buffer transcript flow.
+- Re-verified the suite after the live audio scaffold changes.
+
+2026-04-08 - Explicit current gaps logged
+- Head shake/no calibration remains unreliable and is an open tuning item.
+- Wake-word is still using a placeholder built-in model, not a custom OSCAR wake-word model.
+- Live audio path is scaffolded but still needs real-device validation, latency tuning, and noise testing.
+- Screenpipe, real VLM integration, real LLM/OpenVINO integration, and Piper runtime validation are still pending.
+
+2026-04-08 - Local brain planner strengthened
+- Expanded core/brain.py from a minimal fallback into a more capable local structured planner.
+- Added support for common command classes such as open app, type/write text, press key, focus address bar, and directional scrolling.
+- This improves the transcript -> plan -> action flow immediately without pretending a real Llama backend is already present.
+- The true GenAI brain step remains blocked on acquiring and wiring a local Llama/OpenVINO model.
+
+2026-04-08 - Debug calibration skips added
+- Added `runtime.calibration_skip_steps` to settings.yaml so specific calibration steps can be bypassed during development.
+- The skip list is applied inside the Eyes calibration state machine without disabling the rest of the calibration gate.
+- Verified the behavior with a dedicated test and re-ran the full suite successfully.
+
+2026-04-08 - Skipped calibration steps made visible in dev UI
+- Updated the sandbox development window to show which calibration steps were skipped by configuration.
+- This makes the debug startup state visible without needing to inspect config files or logs during testing.
+
+2026-04-08 - Real brain backend seam added
+- Upgraded core/brain.py to support an optional local OpenVINO-backed LLM path while preserving the existing structured fallback planner.
+- Added brain diagnostics to startup logging so the runtime now reports whether the configured LLM backend and local model path are actually live.
+- Extended settings.yaml and requirements.txt for OpenVINO, Optimum Intel, Transformers, and local LLM generation controls.
+- Expanded scripts/download_models.py with a local OpenVINO LLM download path targeting the configured `models/llama` directory.
+- Re-ran the full suite after the brain-backend refactor and confirmed all tests still pass.
+
+2026-04-08 - OpenVINO brain runtime installed and verified
+- Installed `openvino`, `optimum-intel`, `transformers`, and `sentencepiece` into the embedded Python runtime at `tools/python313`.
+- Downloaded the local OpenVINO LLM model `llmware/llama-3.2-1b-instruct-ov` into `models/llama`.
+- Verified that core/brain.py now reports the OpenVINO backend as loaded against the local model path.
+- Strengthened the prompt template with explicit action vocabulary and JSON-only examples to improve small-model planning reliability.
+- Kept the deterministic fallback planner in place so invalid or unusable model output does not break the orchestration path.

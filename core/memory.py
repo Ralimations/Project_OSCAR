@@ -28,6 +28,9 @@ class Memory:
             return "No matching OCR history was found."
         return "\n".join(text_rows)
 
+    def recent_history(self, limit: int = 8) -> str:
+        return self.query_recent_text(prompt="", limit=limit)
+
     def _get_tables(self, connection: sqlite3.Connection) -> list[str]:
         rows = connection.execute(
             "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"

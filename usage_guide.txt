@@ -8,6 +8,18 @@ It listens for gesture events and transcript events, routes the request, then ex
 
 Current Control Methods
 -----------------------
+0. Startup calibration sequence
+- Before live gesture control is enabled, OSCAR asks the user to complete a calibration pass.
+- Required sequence:
+- show one open hand with all 5 fingers visible
+- do 2 strong nod movements up and down for yes
+- do 2 strong head shakes left and right for no/disagree
+- Until calibration is complete, OSCAR should not dispatch live gesture controls.
+- Head calibration is now evaluated relative to a neutral face position, not by absolute head angle alone.
+- For debugging, specific calibration steps can be skipped with `runtime.calibration_skip_steps` in `config/settings.yaml`.
+- Example debug skip list:
+- `["nod_yes", "shake_no"]`
+
 1. Hand pinch gesture
 - Thumb tip and index tip close together triggers a click.
 - This maps to a mouse click action.
@@ -19,12 +31,14 @@ Current Control Methods
 3. Head confirmation gestures
 - Head nod maps to "yes".
 - Head shake maps to "no".
+- For calibration, these now require strong repeated movement rather than a single pose angle.
 - These are recognized in the gesture interpreter logic, but they are not yet fully consumed by a live approval workflow.
 
 4. Transcript or wake-word path
 - OSCAR accepts transcript events through the Ears module.
 - The real wake-word and STT model loading seams exist.
 - The current codebase can process injected transcript events and transcribed audio-file results.
+- The current local wake-word model is a stand-in openWakeWord model file, not a custom "Oscar" wake-word model yet.
 
 Current Supported Features
 --------------------------
@@ -60,7 +74,8 @@ Current Supported Features
 6. Brain route
 - If the request is not a direct route, macro route, memory route, or vision route, OSCAR falls back to the Brain module.
 - The Brain enforces strict JSON output before actions are executed.
-- Current fallback behavior supports simple speak/open behavior and safe rejection.
+- The current local brain planner now supports common structured actions such as speaking, opening apps, typing text, pressing keys, hotkeys, and scroll commands.
+- A true local Llama/OpenVINO backend is still not attached yet.
 
 7. Voice output
 - OSCAR can dispatch a "speak" action.
@@ -111,20 +126,60 @@ How OSCAR Works
 - Eyes resumes.
 - OSCAR returns to dormant state.
 
-How To Use It
--------------
-1. Start the project from the project root
-- Use the embedded interpreter:
-- .\tools\python313\python.exe main.py
+How To Install & Run
+--------------------
+1. Setup the Python Environment
+- Use the enclosed embedded Python 3.13 interpreter inside the project directory to keep dependencies isolated:
+  ```powershell
+  .\tools\python313\python.exe -m pip install -r requirements.txt
+  ```
+
+2. Download Local Models
+- OSCAR requires offline models (openWakeWord, MediaPipe landmarker models) before it can run.
+- Execute the bootstrap script to download all necessary assets:
+  ```powershell
+  .\tools\python313\python.exe scripts\download_models.py
+  ```
+- Note: The Gemma 4 export step in the script currently fails safely because `optimum-intel` (up to v1.27.0) caps at `transformers<4.58`, while Gemma 4 requires `transformers>=5.0`. This is a known upstream block. All other visual/audio assets will download correctly.
+
+3. Start the Orchestrator
+- From the project root, run:
+  ```powershell
+  .\tools\python313\python.exe main.py
+  ```
+- On startup, OSCAR now logs a diagnostics banner reporting the availability of model components.
+- active interpreter path
+- wake-word model loaded status
+- whisper model loaded status
+- MediaPipe Tasks availability
+- hand landmarker model presence
+- face landmarker model presence
+- calibration required status
+- vision capture availability
+- voice readiness
+- action dispatch readiness
 
 2. Use gesture control
+- First complete calibration in this order:
+- open hand
+- nod
+- shake
+- tilt head
 - Present a hand to the camera.
 - Pinch thumb and index finger to click.
 - Move index and middle finger vertically to scroll.
+- In development mode, OSCAR also opens:
+- an "OSCAR Tracking" window for live hand landmark review
+- an "OSCAR Sandbox" window for safe cursor and action preview
+- By default, development mode keeps actions inside the sandbox instead of sending them to the real desktop.
+- The tracking and sandbox windows also show the current calibration step and the completed calibration steps.
+- If debug skips are enabled, the sandbox window also shows which calibration steps were skipped.
+- The tracking window now also draws face landmark dots and shows live pitch/yaw/roll values for calibration review.
 
 3. Use transcript-driven control
 - The codebase currently supports transcript injection through the Ears module.
-- Once the live audio path is finalized, the same route will be used for wake-word + speech input.
+- A live microphone ingress path now exists in the Ears module for wake-word and STT capture.
+- It still needs real-device tuning and validation on the laptop microphone.
 
 4. Example commands
 - "open notepad"
@@ -142,7 +197,11 @@ Configuration Files
 - Gesture thresholds
 - Screenpipe database path
 - Piper executable and model path
+- MediaPipe hand landmarker task path
 - Wake-word and Whisper model paths
+- Development mode flags for tracking window, sandbox window, and sandbox-only actions
+- Camera mirroring flag for natural left/right movement during gesture control
+- Calibration skip list for debugging specific startup steps
 
 2. config/app_macros.json
 - App-specific macro mappings
@@ -157,16 +216,32 @@ Known Current Limits
 --------------------
 1. Real live microphone capture and continuous wake-word audio streaming are not fully wired end-to-end yet.
 2. The visual route has screenshot capture and cleanup, but no live VLM backend is configured by default.
-3. The brain route has strict planning logic, but no real local LLM backend is attached by default.
+3. The brain route now has both a deterministic fallback planner and a real local OpenVINO LLM path.
+   The embedded runtime packages and a local model directory at `models/llama` are now installed, so OSCAR can attempt local LLM planning offline.
 4. Head nod and head shake are recognized in logic, but not yet used in a full confirmation UX flow.
 5. Piper speech depends on a valid local Piper executable and model path.
 6. OCR memory retrieval depends on a valid local SQLite OCR database at the configured path.
+7. The downloaded wake-word model currently uses an openWakeWord built-in phrase as a temporary placeholder until a custom OSCAR wake-word model is trained or added.
+8. Head shake calibration is still unreliable and should be treated as an open tuning issue.
+
+Current Lacking Items
+---------------------
+1. Real microphone behavior still needs tuning for the target laptop environment.
+2. Wake-word currently uses a placeholder openWakeWord model, not a trained OSCAR wake word.
+3. Live STT needs end-to-end validation with actual speech, latency, and background noise.
+4. Screenpipe OCR route is wired structurally but still needs validation against a real local OCR database.
+5. Vision route still needs a real local VLM backend.
+6. Brain route is now backed by a real local OpenVINO model, but it still needs real-world prompt tuning and behavior validation on your laptop.
+7. Voice route still needs a working local Piper installation and model.
+8. Head shake/no detection is not production-ready yet.
 
 Quick Reality Check
 -------------------
 What exists now:
 - Full orchestrator structure
-- Gesture loop
+- Gesture loop using MediaPipe Tasks hand landmarker
+- Face-landmarker-based startup calibration for open hand, nod, shake, and tilt
+- Development review windows for tracking and sandboxed gesture action testing
 - Transcript routing
 - Direct commands
 - App macros
@@ -180,6 +255,6 @@ What still needs real-world debugging:
 - Model weight paths
 - Microphone and wake-word streaming
 - Faster-Whisper runtime performance
-- Camera behavior on the target laptop
+- Camera behavior and live hand tracking quality on the target laptop
 - Automation edge cases on Windows
 - End-to-end latency tuning

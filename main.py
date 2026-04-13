@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import gc
 import json
 import logging
+import os
 import signal
+import subprocess
+import sys
 import threading
 import time
 from dataclasses import dataclass
@@ -10,23 +14,20 @@ from enum import Enum
 from pathlib import Path
 from typing import Any
 
-import yaml
-
 from actions.controller import ActionController, ActionRequest
-from actions.window_manager import WindowManager
 from core.brain import Brain, BrainOutputError
-from core.ears import Ears, TranscriptEvent
+from core.ears import AudioCaptureEvent, Ears
 from core.eyes import Eyes, GestureEvent
 from core.memory import Memory
-from core.router import DirectCommandRouter
+from core.ollama_client import OllamaClient
 from core.vision import Vision
-from core.voice import Voice
 
 
 class OrchestratorState(str, Enum):
     DORMANT = "dormant"
-    ROUTING = "routing"
-    REASONING = "reasoning"
+    TRIGGER = "trigger"
+    AUDIO = "audio"
+    OMNI_INFERENCE = "omni_inference"
     CLEANUP = "cleanup"
     SHUTDOWN = "shutdown"
 
@@ -38,39 +39,81 @@ class RuntimeConfig:
     app_macros: dict[str, Any]
 
 
+def ensure_runtime_models(model_path: str | Path) -> None:
+    target_dir = Path(model_path)
+    if target_dir.exists() and any(target_dir.iterdir()):
+        return
+    print("Downloading and compiling Gemma 4 E4B for Intel i3. Please wait...")
+    subprocess.run([sys.executable, "scripts/download_models.py"], check=True)
+
+
+def configure_threading(cpu_threads: int) -> None:
+    thread_count = str(max(1, int(cpu_threads)))
+    for variable in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS", "NUMEXPR_NUM_THREADS"):
+        os.environ.setdefault(variable, thread_count)
+
+
+def build_ollama_client(model_settings: dict[str, Any]) -> OllamaClient | None:
+    backend = str(model_settings.get("inference_backend", "")).strip().lower()
+    if backend != "ollama":
+        return None
+    model_name = str(model_settings.get("ollama_model", "")).strip()
+    if not model_name:
+        logging.warning("Ollama backend is enabled but no 'ollama_model' is configured.")
+        return None
+    base_url = str(model_settings.get("ollama_base_url", "http://127.0.0.1:11434")).strip()
+    timeout_seconds = int(model_settings.get("ollama_timeout_seconds", 120))
+    return OllamaClient(model=model_name, base_url=base_url, timeout_seconds=timeout_seconds)
+
+
 class OSCAR:
-    """Offline orchestrator implementing the PRD control loop."""
+    """Offline dormant/trigger/omni-action orchestrator."""
 
     def __init__(self, config: RuntimeConfig) -> None:
         self._config = config
+        self._runtime_settings = config.settings["runtime"]
+        self._hardware_settings = config.settings["hardware"]
+        self._screenpipe_settings = config.settings["screenpipe"]
+        self._model_settings = config.settings["models"]
+        active_profile_name = self._model_settings.get("active_profile", "aibox")
+        active_profile_settings = self._model_settings.get("profiles", {}).get(active_profile_name, {})
+        self._model_settings = {**self._model_settings, **active_profile_settings}
         self._state = OrchestratorState.DORMANT
         self._state_lock = threading.Lock()
         self._stop_event = threading.Event()
-        self._controller = ActionController()
-        self._window_manager = WindowManager()
-        self._router = DirectCommandRouter()
-        self._brain = Brain(prompt_template_path=Path("config") / "prompt_template.txt")
-        self._memory = Memory(database_path=config.settings["screenpipe"]["database_path"])
-        self._vision = Vision()
-        self._voice = Voice(
-            model_path=config.settings["voice"]["model_path"],
-            piper_executable=config.settings["voice"]["piper_executable"],
+        self._busy = threading.Lock()
+        ollama_client = build_ollama_client(self._model_settings)
+        self._controller = ActionController(dry_run=bool(self._runtime_settings.get("sandbox_actions_only", False)))
+        self._memory = Memory(database_path=self._screenpipe_settings["database_path"])
+        self._vision = Vision(
+            answer_backend=ollama_client.answer_visual_question if ollama_client is not None else None
+        )
+        self._brain = Brain(
+            prompt_template_path=Path("config") / "prompt_template.txt",
+            model_path=self._model_settings.get("gemma_model_path"),
+            device=str(self._hardware_settings.get("openvino_device", "AUTO")),
+            max_new_tokens=int(self._model_settings.get("gemma_max_new_tokens", 128)),
+            temperature=float(self._model_settings.get("gemma_temperature", 0.0)),
+            infer_backend=ollama_client.infer_action if ollama_client is not None else None,
+            backend_name=f"ollama:{ollama_client.model}" if ollama_client is not None else None,
         )
         self._ears = Ears(
-            on_transcript=self._handle_transcript_event,
-            wake_word_model_path=config.settings["models"]["wake_word_model_path"],
-            whisper_model_path=config.settings["models"]["whisper_model_path"],
+            on_audio_captured=self._handle_audio_capture,
+            wake_word_model_path=self._model_settings["wake_word_model_path"],
+            audio_settings=config.settings["audio"],
         )
         self._eyes = Eyes(
             settings={
-                **config.settings["runtime"],
+                **self._runtime_settings,
                 **config.settings["gestures"],
+                "hand_landmarker_task_path": self._model_settings["hand_landmarker_task_path"],
+                "face_landmarker_task_path": self._model_settings["face_landmarker_task_path"],
             },
             on_gesture=self._handle_gesture,
         )
-        self._controller.register_handler("speak", self._voice.speak)
 
     def start(self) -> None:
+        self.log_startup_diagnostics()
         self._controller.start()
         self._ears.start()
         self._eyes.start()
@@ -95,149 +138,105 @@ class OSCAR:
 
     def _handle_gesture(self, event: GestureEvent) -> None:
         with self._state_lock:
-            current_state = self._state
-
-        if current_state != OrchestratorState.DORMANT:
-            logging.debug("Ignoring gesture '%s' while state is %s.", event.name, current_state)
-            return
-
-        request = ActionRequest(action=event.action, value=event.value, source="gesture")
-        self._controller.dispatch(request)
-        logging.info("Gesture routed: %s -> %s", event.name, request.action)
-
-    def _handle_transcript_event(self, event: TranscriptEvent) -> None:
-        self.handle_wake_word(event.transcript)
-
-    def handle_wake_word(self, transcript: str) -> None:
-        with self._state_lock:
-            self._state = OrchestratorState.ROUTING
-        self._eyes.pause()
-        logging.info("Wake word path requested with transcript: %s", transcript)
-
+            if self._state != OrchestratorState.DORMANT:
+                logging.debug("Ignoring gesture '%s' while state is %s.", event.name, self._state)
+                return
+            self._state = OrchestratorState.TRIGGER
         try:
-            if self._dispatch_direct_route(transcript):
-                return
-            if self._dispatch_macro_route(transcript):
-                return
-            self._dispatch_reasoned_route(transcript)
+            self._controller.dispatch(ActionRequest(action=event.action, value=event.value, source="gesture"))
         finally:
-            self._cleanup_after_reasoning()
+            with self._state_lock:
+                self._state = OrchestratorState.DORMANT
 
-    def _dispatch_direct_route(self, transcript: str) -> bool:
-        direct_result = self._router.route(transcript)
-        if direct_result is None:
-            return False
-        self._controller.dispatch(direct_result.request)
-        logging.info("Direct route matched %s for transcript '%s'.", direct_result.matched_rule, transcript)
-        return True
-
-    def _dispatch_macro_route(self, transcript: str) -> bool:
-        macro_request = self.resolve_macro_request(transcript)
-        if macro_request is None:
-            return False
-        self._controller.dispatch(macro_request)
-        logging.info("Macro routed from transcript '%s': %s", transcript, macro_request.action)
-        return True
-
-    def _dispatch_reasoned_route(self, transcript: str) -> None:
-        with self._state_lock:
-            self._state = OrchestratorState.REASONING
-
-        route_decision = self._brain.decide_route(transcript)
-        if route_decision.route == "memory":
-            context = self._memory.query_recent_text(route_decision.context_prompt)
-        elif route_decision.route == "vision":
-            context = self._vision.answer_visual_question(route_decision.context_prompt)
-        else:
-            context = ""
-
-        try:
-            plan = self._brain.plan(transcript=transcript, context=context)
-        except BrainOutputError:
-            logging.exception("Brain output sanitization failed.")
-            self._controller.dispatch(ActionRequest(action="speak", value="I could not safely execute that request.", source="brain"))
+    def _handle_audio_capture(self, event: AudioCaptureEvent) -> None:
+        if not self._busy.acquire(blocking=False):
+            logging.debug("Wake-word trigger ignored because inference is already active.")
             return
+        threading.Thread(target=self._process_audio_trigger, args=(event,), name="oscar-omni", daemon=True).start()
 
-        self._controller.dispatch(ActionRequest(action=plan.action, value=plan.value, source="brain"))
+    def _process_audio_trigger(self, event: AudioCaptureEvent) -> None:
+        screenshot_path = ""
+        self._eyes.pause()
+        try:
+            with self._state_lock:
+                self._state = OrchestratorState.AUDIO
+            screenshot_path = self._vision.capture_snapshot()
+            ocr_history = self._memory.recent_history(limit=int(self._screenpipe_settings.get("history_limit", 8)))
+            with self._state_lock:
+                self._state = OrchestratorState.OMNI_INFERENCE
+            response = self._brain.infer_action(
+                audio_samples=event.audio_samples,
+                sample_rate=event.sample_rate,
+                screenshot_path=screenshot_path or None,
+                ocr_history=ocr_history,
+            )
+            self._controller.dispatch(ActionRequest(action=response.action, value=response.value, source="gemma"))
+        except BrainOutputError:
+            logging.exception("Gemma action output was not valid JSON.")
+        except Exception:
+            logging.exception("Omni-inference pipeline failed.")
+        finally:
+            with self._state_lock:
+                self._state = OrchestratorState.CLEANUP
+            if screenshot_path:
+                Path(screenshot_path).unlink(missing_ok=True)
+            self._brain.flush_context()
+            gc.collect()
+            self._eyes.resume()
+            with self._state_lock:
+                self._state = OrchestratorState.DORMANT
+            if self._busy.locked():
+                self._busy.release()
 
-    def _cleanup_after_reasoning(self) -> None:
-        with self._state_lock:
-            self._state = OrchestratorState.CLEANUP
-        self._eyes.resume()
-        with self._state_lock:
-            self._state = OrchestratorState.DORMANT
-
-    def resolve_macro_request(self, transcript: str) -> ActionRequest | None:
-        normalized_transcript = transcript.strip().lower()
-        if not normalized_transcript:
-            return None
-
-        active_window = self.active_window_title()
-        if not active_window:
-            return None
-
-        app_name, macros = self._match_app_macros(active_window)
-        if not macros:
-            return None
-
-        for command_name, payload in macros.items():
-            spoken_command = command_name.replace("_", " ").strip().lower()
-            if spoken_command == normalized_transcript:
-                return ActionRequest(
-                    action=str(payload["action"]),
-                    value=payload.get("value"),
-                    source=f"macro:{app_name}",
-                )
-        return None
-
-    def _match_app_macros(self, active_window: str) -> tuple[str | None, dict[str, Any] | None]:
-        normalized_window = active_window.lower()
-        for app_name, macros in self._config.app_macros.items():
-            if app_name.lower() in normalized_window:
-                return app_name, macros
-        return None, None
-
-    def active_window_title(self) -> str | None:
-        return self._window_manager.get_active_window_title()
+    def log_startup_diagnostics(self) -> None:
+        ear_diag = self._ears.diagnostics()
+        eye_diag = self._eyes.diagnostics()
+        brain_diag = self._brain.diagnostics()
+        logging.info("OSCAR startup diagnostics:")
+        logging.info("  python: %s", sys.executable)
+        logging.info("  wake_word_model_loaded: %s", ear_diag["wake_word_model_loaded"])
+        logging.info("  audio_capture_enabled: %s", ear_diag["audio_capture_enabled"])
+        logging.info("  mediapipe_tasks_available: %s", eye_diag["mediapipe_tasks_available"])
+        logging.info("  hand_landmarker_model_present: %s", eye_diag["hand_landmarker_model_present"])
+        logging.info("  face_landmarker_model_present: %s", eye_diag["face_landmarker_model_present"])
+        logging.info("  gemma_model_exists: %s", brain_diag["model_path_exists"])
+        logging.info("  inference_backend: %s", brain_diag["backend_name"])
+        logging.info("  openvino_device: %s", brain_diag["openvino_device"])
 
 
-def load_config(base_dir: Path) -> RuntimeConfig:
-    config_dir = base_dir / "config"
-    with (config_dir / "settings.yaml").open("r", encoding="utf-8") as handle:
-        settings = yaml.safe_load(handle)
-    with (config_dir / "gestures.json").open("r", encoding="utf-8") as handle:
-        gestures = json.load(handle)
-    with (config_dir / "app_macros.json").open("r", encoding="utf-8") as handle:
-        app_macros = json.load(handle)
+def load_runtime_config() -> RuntimeConfig:
+    settings = json.loads(Path("config/settings.yaml").read_text(encoding="utf-8"))
+    gestures = json.loads(Path("config/gestures.json").read_text(encoding="utf-8"))
+    app_macros = json.loads(Path("config/app_macros.json").read_text(encoding="utf-8"))
     return RuntimeConfig(settings=settings, gestures=gestures, app_macros=app_macros)
 
 
-def configure_logging(base_dir: Path, log_level: str) -> None:
-    logs_dir = base_dir / "logs"
-    logs_dir.mkdir(exist_ok=True)
-    logging.basicConfig(
-        level=getattr(logging, log_level.upper(), logging.INFO),
-        format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
-        handlers=[
-            logging.FileHandler(logs_dir / "oscar.log", encoding="utf-8"),
-            logging.StreamHandler(),
-        ],
-    )
+def configure_logging(level_name: str) -> None:
+    level = getattr(logging, level_name.upper(), logging.INFO)
+    logging.basicConfig(level=level, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
 
-def main() -> None:
-    base_dir = Path(__file__).resolve().parent
-    config = load_config(base_dir)
-    configure_logging(base_dir, config.settings["runtime"]["log_level"])
+def main() -> int:
+    config = load_runtime_config()
+    configure_threading(int(config.settings["hardware"]["cpu_threads"]))
+    configure_logging(config.settings["runtime"]["log_level"])
+    active_profile_name = config.settings["models"].get("active_profile", "aibox")
+    active_profile = config.settings["models"].get("profiles", {}).get(active_profile_name, {})
+    
+    if str(active_profile.get("inference_backend", "")).strip().lower() != "ollama":
+        model_path = config.settings["models"].get("gemma_model_path", "models/gemma")
+        ensure_runtime_models(model_path)
     oscar = OSCAR(config)
 
-    def _shutdown_handler(*_: Any) -> None:
+    def _shutdown_handler(_signum, _frame) -> None:
         oscar.stop()
 
     signal.signal(signal.SIGINT, _shutdown_handler)
-    signal.signal(signal.SIGTERM, _shutdown_handler)
+    if hasattr(signal, "SIGTERM"):
+        signal.signal(signal.SIGTERM, _shutdown_handler)
     oscar.run()
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

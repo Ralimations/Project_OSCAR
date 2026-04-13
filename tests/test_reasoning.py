@@ -1,20 +1,12 @@
-import os
 import sqlite3
 import tempfile
 import unittest
 
 from actions.controller import ActionRequest
 from core.brain import Brain, sanitize_llm_output
+from core.ears import AudioCaptureEvent
 from core.memory import Memory
-from main import OSCAR, RuntimeConfig
-
-
-class FakeWindowManager:
-    def __init__(self, title: str | None) -> None:
-        self._title = title
-
-    def get_active_window_title(self) -> str | None:
-        return self._title
+from main import OSCAR, OrchestratorState, RuntimeConfig
 
 
 class FakeController:
@@ -30,9 +22,6 @@ class FakeController:
     def dispatch(self, request: ActionRequest) -> None:
         self.dispatched.append(request)
 
-    def register_handler(self, action: str, handler) -> None:
-        return
-
 
 class FakeEyes:
     def __init__(self) -> None:
@@ -43,6 +32,13 @@ class FakeEyes:
 
     def stop(self) -> None:
         return
+
+    def diagnostics(self) -> dict[str, bool]:
+        return {
+            "mediapipe_tasks_available": True,
+            "hand_landmarker_model_present": True,
+            "face_landmarker_model_present": True,
+        }
 
     def pause(self) -> None:
         self.paused = True
@@ -55,43 +51,46 @@ class OrchestratorReasoningTests(unittest.TestCase):
     def setUp(self) -> None:
         self.config = RuntimeConfig(
             settings={
-                "runtime": {"log_level": "INFO", "dormant_fps": 15, "gesture_cooldown_ms": 200},
+                "runtime": {"log_level": "INFO", "dormant_fps": 15, "gesture_cooldown_ms": 200, "sandbox_actions_only": True},
+                "hardware": {"cpu_threads": 4, "openvino_device": "AUTO"},
                 "gestures": {"pinch_threshold": 0.045, "scroll_deadzone": 0.03, "scroll_scale": 1200, "nod_threshold": 12, "shake_threshold": 18},
-                "screenpipe": {"database_path": "database/screenpipe.db"},
-                "voice": {"model_path": "", "piper_executable": "piper"},
-                "models": {"wake_word_model_path": "", "whisper_model_path": ""},
+                "audio": {"enabled": False, "sample_rate": 16000, "chunk_ms": 80, "capture_seconds": 3.0, "wake_threshold": 0.5},
+                "screenpipe": {"database_path": "database/screenpipe.db", "history_limit": 8},
+                "models": {
+                    "inference_backend": "fallback",
+                    "wake_word_model_path": "",
+                    "gemma_model_path": "models/gemma-4-e4b-openvino",
+                    "hand_landmarker_task_path": "",
+                    "face_landmarker_task_path": "",
+                },
             },
             gestures={},
-            app_macros={"BandLab": {"start_recording": {"action": "press_key", "value": "r"}}},
+            app_macros={},
         )
         self.oscar = OSCAR(self.config)
         self.oscar._controller = FakeController()
-        self.oscar._window_manager = FakeWindowManager("BandLab Studio")
         self.oscar._eyes = FakeEyes()
-        self.oscar._brain = Brain(prompt_template_path="config/prompt_template.txt")
 
     def tearDown(self) -> None:
         self.oscar.stop()
 
-    def test_memory_route_dispatches_speak_from_context(self) -> None:
-        self.oscar._memory = type("MemoryStub", (), {"query_recent_text": lambda _self, _prompt: "john@example.com"})()
-        self.oscar.handle_wake_word("What was that email address?")
-        self.assertEqual("speak", self.oscar._controller.dispatched[-1].action)
-        self.assertEqual("john@example.com", self.oscar._controller.dispatched[-1].value)
-        self.assertFalse(self.oscar._eyes.paused)
+    def test_audio_trigger_dispatches_gemma_action(self) -> None:
+        self.oscar._memory = type("MemoryStub", (), {"recent_history": lambda _self, limit=8: "address bar visible"})()
+        self.oscar._vision = type("VisionStub", (), {"capture_snapshot": lambda _self: ""})()
+        self.oscar._brain = Brain(
+            prompt_template_path="config/prompt_template.txt",
+            infer_backend=lambda _prompt, _screenshot, _audio, _rate: '{"action":"hotkey","value":["ctrl","l"]}',
+        )
 
-    def test_macro_route_takes_priority_before_brain(self) -> None:
-        self.oscar.handle_wake_word("start recording")
-        self.assertEqual("press_key", self.oscar._controller.dispatched[-1].action)
-        self.assertEqual("r", self.oscar._controller.dispatched[-1].value)
+        self.oscar._process_audio_trigger(AudioCaptureEvent(audio_samples=[0.1], sample_rate=16000))
+
+        self.assertEqual("hotkey", self.oscar._controller.dispatched[-1].action)
+        self.assertEqual(["ctrl", "l"], self.oscar._controller.dispatched[-1].value)
+        self.assertFalse(self.oscar._eyes.paused)
+        self.assertEqual(OrchestratorState.DORMANT, self.oscar._state)
 
 
 class BrainTests(unittest.TestCase):
-    def test_route_decision_detects_visual_query(self) -> None:
-        brain = Brain(prompt_template_path="config/prompt_template.txt")
-        decision = brain.decide_route("Where is the submit button?")
-        self.assertEqual("vision", decision.route)
-
     def test_sanitize_allows_sequence_actions(self) -> None:
         response = sanitize_llm_output('{"action":"sequence","value":[{"action":"press_key","value":"r"}]}')
         self.assertEqual("sequence", response.action)
@@ -106,18 +105,11 @@ class MemoryTests(unittest.TestCase):
             connection.execute("CREATE TABLE ocr_log (text TEXT, window_title TEXT)")
             connection.execute("INSERT INTO ocr_log (text, window_title) VALUES (?, ?)", ("john@example.com", "Mail"))
             connection.commit()
-            connection.close()
-
             memory = Memory(database_path=db_path)
             result = memory.query_recent_text("john")
             self.assertIn("john@example.com", result)
         finally:
-            if connection:
-                try:
-                    connection.close()
-                except sqlite3.Error:
-                    pass
-            os.remove(db_path)
+            connection.close()
 
 
 if __name__ == "__main__":

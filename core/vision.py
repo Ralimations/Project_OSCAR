@@ -17,6 +17,9 @@ class Vision:
     def __init__(self, answer_backend: Callable[[str, str], str] | None = None) -> None:
         self._answer_backend = answer_backend
 
+    def is_ready(self) -> bool:
+        return pyautogui is not None
+
     def answer_visual_question(self, prompt: str) -> str:
         screenshot_path = self.capture_snapshot()
         try:
@@ -27,10 +30,12 @@ class Vision:
             if screenshot_path and os.path.exists(screenshot_path):
                 os.remove(screenshot_path)
 
-    def capture_snapshot(self) -> str:
+    def capture_snapshot(self, max_size: tuple[int, int] = (960, 540)) -> str:
         if pyautogui is None:
             return ""
         image = pyautogui.screenshot()
+        if hasattr(image, "thumbnail"):
+            image.thumbnail(max_size)
         handle, path = tempfile.mkstemp(prefix="oscar_snapshot_", suffix=".png")
         os.close(handle)
         image.save(Path(path))

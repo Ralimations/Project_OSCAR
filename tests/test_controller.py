@@ -39,6 +39,19 @@ class ActionControllerTests(unittest.TestCase):
         finally:
             controller.stop()
 
+    def test_dry_run_still_notifies_action_observer(self) -> None:
+        observed: queue.Queue[str] = queue.Queue()
+        controller = ActionController(
+            dry_run=True,
+            action_observer=lambda request: observed.put(request.action),
+        )
+        controller.start()
+        try:
+            controller.dispatch(ActionRequest(action="click", source="test"))
+            self.assertEqual("click", observed.get(timeout=1.0))
+        finally:
+            controller.stop()
+
 
 if __name__ == "__main__":
     unittest.main()

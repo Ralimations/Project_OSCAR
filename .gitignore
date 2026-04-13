@@ -28,6 +28,10 @@ logs/
 *.sqlite3
 *.sqlite
 
+# Downloaded models
+models/*
+!models/.gitkeep
+
 # IDEs
 .vscode/
 .idea/

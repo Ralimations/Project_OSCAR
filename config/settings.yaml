@@ -1,42 +1,58 @@
-runtime:
-  log_level: INFO
-  dormant_fps: 15
-  action_worker_poll_ms: 50
-  gesture_cooldown_ms: 200
-  memory_budget_gb: 10
-
-hardware:
-  cpu_threads: 4
-  vision_thread_name: oscar-eyes
-  wake_word_thread_name: oscar-ears
-  pin_wake_word_low_usage: true
-  prefer_openvino: true
-
-screenpipe:
-  enabled: true
-  throttle_fps: 1
-  video_archiving: false
-  database_path: database/screenpipe.db
-
-voice:
-  piper_executable: piper
-  model_path: models/piper/en_GB-alan-medium.onnx
-
-models:
-  llm_backend: openvino
-  llm_variant: llama-3.2-1b
-  llm_quantization: int4
-  llm_model_path: models/llama
-  vlm_variant: moondream2
-  vlm_model_path: models/moondream2
-  whisper_variant: tiny
-  whisper_quantization: int8
-  whisper_model_path: models/faster-whisper-tiny
-  wake_word_model_path: models/openwakeword
-
-gestures:
-  pinch_threshold: 0.045
-  scroll_deadzone: 0.03
-  scroll_scale: 1200
-  nod_threshold: 12
-  shake_threshold: 18
+{
+  "runtime": {
+    "log_level": "INFO",
+    "dormant_fps": 15,
+    "gesture_cooldown_ms": 200,
+    "development_mode": false,
+    "sandbox_actions_only": true,
+    "require_calibration": true,
+    "mirror_camera": true,
+    "calibration_skip_steps": []
+  },
+  "hardware": {
+    "cpu_threads": 4,
+    "wake_word_thread_name": "oscar-wakeword",
+    "gesture_thread_name": "oscar-gestures",
+    "openvino_device": "AUTO"
+  },
+  "audio": {
+    "enabled": true,
+    "sample_rate": 16000,
+    "chunk_ms": 80,
+    "capture_seconds": 3.0,
+    "wake_threshold": 0.5,
+    "input_device": null
+  },
+  "screenpipe": {
+    "enabled": true,
+    "database_path": "database/screenpipe.db",
+    "history_limit": 8
+  },
+  "models": {
+    "active_profile": "aibox",
+    "profiles": {
+      "aibox": {
+        "inference_backend": "ollama",
+        "ollama_base_url": "http://127.0.0.1:11434",
+        "ollama_model": "gemma4:e2b",
+        "ollama_timeout_seconds": 120
+      },
+      "builtin": {
+        "inference_backend": "ollama",
+        "ollama_base_url": "http://127.0.0.1:11434",
+        "ollama_model": "llama3.2:1b",
+        "ollama_timeout_seconds": 120
+      }
+    },
+    "hand_landmarker_task_path": "models/mediapipe/hand_landmarker.task",
+    "face_landmarker_task_path": "models/mediapipe/face_landmarker.task",
+    "wake_word_model_path": "models/openwakeword"
+  },
+  "gestures": {
+    "pinch_threshold": 0.045,
+    "scroll_deadzone": 0.03,
+    "scroll_scale": 1200,
+    "nod_threshold": 12,
+    "shake_threshold": 18
+  }
+}

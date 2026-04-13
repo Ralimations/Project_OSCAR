@@ -27,10 +27,12 @@ class ActionRequest:
 class ActionController:
     """Threaded action dispatcher so the orchestrator never blocks on IO."""
 
-    def __init__(self) -> None:
+    def __init__(self, dry_run: bool = False, action_observer: Callable[[ActionRequest], None] | None = None) -> None:
         self._queue: queue.Queue[ActionRequest] = queue.Queue()
         self._stop_event = threading.Event()
         self._thread = threading.Thread(target=self._worker, name="oscar-actions", daemon=True)
+        self._dry_run = dry_run
+        self._action_observer = action_observer
         self._handlers: dict[str, Callable[[Any], None]] = {
             "click": self._click,
             "scroll": self._scroll,
@@ -65,6 +67,8 @@ class ActionController:
             self._execute_request(request)
 
     def _execute_request(self, request: ActionRequest) -> None:
+        if self._action_observer is not None:
+            self._action_observer(request)
         handler = self._handlers.get(request.action)
         if handler is None:
             LOGGER.warning("Unsupported action '%s' from %s.", request.action, request.source)
@@ -76,25 +80,25 @@ class ActionController:
             LOGGER.exception("Action '%s' failed.", request.action)
 
     def _click(self, _: Any) -> None:
-        if pyautogui is None:
+        if pyautogui is None or self._dry_run:
             LOGGER.info("Simulated click action.")
             return
         pyautogui.click()
 
     def _scroll(self, amount: Any) -> None:
-        if pyautogui is None:
+        if pyautogui is None or self._dry_run:
             LOGGER.info("Simulated scroll: %s", amount)
             return
         pyautogui.scroll(int(amount))
 
     def _press_key(self, key: Any) -> None:
-        if pyautogui is None:
+        if pyautogui is None or self._dry_run:
             LOGGER.info("Simulated key press: %s", key)
             return
         pyautogui.press(str(key))
 
     def _hotkey(self, keys: Any) -> None:
-        if pyautogui is None:
+        if pyautogui is None or self._dry_run:
             LOGGER.info("Simulated hotkey: %s", keys)
             return
         if not isinstance(keys, (list, tuple)):
@@ -102,6 +106,9 @@ class ActionController:
         pyautogui.hotkey(*[str(key) for key in keys])
 
     def _open_app(self, command: Any) -> None:
+        if self._dry_run:
+            LOGGER.info("Simulated app launch: %s", command)
+            return
         if isinstance(command, str):
             subprocess.Popen(command, shell=True)
             return
@@ -111,7 +118,7 @@ class ActionController:
         raise TypeError("open_app requires a command string or argv list.")
 
     def _write_text(self, text: Any) -> None:
-        if pyautogui is None:
+        if pyautogui is None or self._dry_run:
             LOGGER.info("Simulated text input: %s", text)
             return
         pyautogui.write(str(text))
