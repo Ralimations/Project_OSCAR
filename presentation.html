@@ -4,30 +4,71 @@
 		<meta charset="utf-8">
 		<title>Project O.S.C.A.R.</title>
 		<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-		<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/reveal.js/4.3.1/reset.min.css">
-		<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/reveal.js/4.3.1/reveal.min.css">
-		<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/reveal.js/4.3.1/theme/blood.min.css" id="theme">
 		
-		<!-- Custom CSS for Premium Look -->
 		<style>
 			:root {
 				--primary: #00d2ff;
 				--secondary: #3a7bd5;
+				--surface: rgba(25, 25, 35, 0.6);
+				--surface-border: rgba(255, 255, 255, 0.1);
+				--text: #f5f8fc;
+			}
+			* {
+				box-sizing: border-box;
 			}
 			body {
+				margin: 0;
+				font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
 				background: radial-gradient(circle at center, #1b2735 0%, #090a0f 100%) !important;
+				color: var(--text);
+				min-height: 100vh;
+				overflow: hidden;
 			}
-			.reveal h1, .reveal h2, .reveal h3, .reveal h4 {
+			button {
+				font: inherit;
+			}
+			.deck {
+				position: relative;
+				min-height: 100vh;
+				padding: 24px 24px 84px;
+			}
+			.slides {
+				position: relative;
+				max-width: 1400px;
+				height: calc(100vh - 120px);
+				margin: 0 auto;
+			}
+			.slides > section {
+				display: none;
+				width: 100%;
+				height: 100%;
+				padding: 24px;
+				justify-content: center;
+				align-items: center;
+				flex-direction: column;
+				text-align: center;
+				overflow: auto;
+			}
+			.slides > section.active {
+				display: flex;
+				animation: slideIn 0.35s ease;
+			}
+			.slide-shell {
+				width: min(1200px, 100%);
+				margin: 0 auto;
+			}
+			h1, h2, h3, h4 {
 				text-transform: uppercase;
 				background: -webkit-linear-gradient(var(--primary), var(--secondary));
 				-webkit-background-clip: text;
 				-webkit-text-fill-color: transparent;
 				font-weight: 800;
 				letter-spacing: 2px;
+				margin-top: 0;
 			}
 			.glass-card {
-				background: rgba(25, 25, 35, 0.6);
-				border: 1px solid rgba(255, 255, 255, 0.1);
+				background: var(--surface);
+				border: 1px solid var(--surface-border);
 				border-radius: 15px;
 				padding: 30px;
 				backdrop-filter: blur(10px);
@@ -87,71 +128,235 @@
 				margin-bottom: 10px;
 				display: block;
 			}
+			.deck-nav {
+				position: fixed;
+				left: 24px;
+				right: 24px;
+				bottom: 20px;
+				display: flex;
+				align-items: center;
+				justify-content: space-between;
+				gap: 16px;
+				z-index: 100;
+			}
+			.progress-shell {
+				flex: 1;
+				height: 10px;
+				border-radius: 999px;
+				overflow: hidden;
+				background: rgba(255, 255, 255, 0.12);
+				box-shadow: inset 0 1px 4px rgba(0, 0, 0, 0.35);
+			}
+			.progress-bar {
+				height: 100%;
+				width: 0;
+				background: linear-gradient(90deg, var(--primary), var(--secondary));
+				transition: width 0.3s ease;
+			}
+			.nav-group {
+				display: flex;
+				align-items: center;
+				gap: 10px;
+			}
+			.nav-btn,
+			.overview-btn {
+				border: 1px solid rgba(255, 255, 255, 0.18);
+				border-radius: 999px;
+				padding: 10px 16px;
+				background: rgba(5, 10, 16, 0.65);
+				color: var(--text);
+				cursor: pointer;
+				transition: transform 0.2s ease, border-color 0.2s ease, background 0.2s ease;
+			}
+			.nav-btn:hover,
+			.overview-btn:hover {
+				transform: translateY(-1px);
+				border-color: var(--primary);
+				background: rgba(0, 210, 255, 0.14);
+			}
+			.slide-counter {
+				min-width: 92px;
+				text-align: center;
+				font-size: 0.95rem;
+				color: rgba(255, 255, 255, 0.82);
+			}
+			.overview-btn {
+				position: fixed;
+				top: 20px;
+				right: 24px;
+				z-index: 100;
+			}
+			.overview {
+				position: fixed;
+				inset: 0;
+				padding: 88px 24px 24px;
+				background: rgba(4, 8, 14, 0.92);
+				backdrop-filter: blur(10px);
+				z-index: 90;
+				display: none;
+				overflow: auto;
+			}
+			.overview.open {
+				display: block;
+			}
+			.overview-grid {
+				max-width: 1200px;
+				margin: 0 auto;
+				display: grid;
+				grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+				gap: 16px;
+			}
+			.overview-card {
+				border: 1px solid rgba(255, 255, 255, 0.1);
+				border-radius: 14px;
+				padding: 16px;
+				background: rgba(255, 255, 255, 0.04);
+				cursor: pointer;
+				text-align: left;
+			}
+			.overview-card:hover {
+				border-color: var(--primary);
+				background: rgba(0, 210, 255, 0.08);
+			}
+			.overview-card strong {
+				display: block;
+				margin-bottom: 8px;
+			}
+			[data-bg-image] {
+				background-position: center;
+				background-size: cover;
+				background-repeat: no-repeat;
+				border-radius: 20px;
+				overflow: hidden;
+				position: relative;
+			}
+			[data-bg-image]::before {
+				content: "";
+				position: absolute;
+				inset: 0;
+				background: rgba(0, 0, 0, 0.45);
+			}
+			[data-bg-image] > * {
+				position: relative;
+				z-index: 1;
+			}
+			@keyframes slideIn {
+				from { opacity: 0; transform: translateY(18px) scale(0.99); }
+				to { opacity: 1; transform: translateY(0) scale(1); }
+			}
+			@media (max-width: 900px) {
+				body {
+					overflow: auto;
+				}
+				.deck {
+					padding: 16px 16px 96px;
+				}
+				.slides {
+					height: auto;
+					min-height: calc(100vh - 120px);
+				}
+				.slides > section {
+					height: auto;
+					min-height: calc(100vh - 120px);
+					padding: 12px 0;
+				}
+				.grid-2,
+				.simulation-layout,
+				.grid-2[style*="1fr 1fr 1fr"] {
+					grid-template-columns: 1fr !important;
+				}
+				.glass-card {
+					max-height: none;
+				}
+				.hero-img {
+					max-width: 100%;
+					height: auto;
+				}
+				.deck-nav {
+					left: 16px;
+					right: 16px;
+					bottom: 14px;
+				}
+				.slide-counter {
+					min-width: 72px;
+					font-size: 0.82rem;
+				}
+			}
 		</style>
 	</head>
 	<body>
-		<div class="reveal">
+		<div class="deck">
+			<button type="button" class="overview-btn" id="overview-toggle">Overview</button>
 			<div class="slides">
 				
 				<!-- Slide 1: Title -->
-				<section>
+				<section data-title="Title">
+					<div class="slide-shell">
 					<span class="badge">OFFLINE MULTIMODAL ASSISTANT</span>
 					<h1>Project O.S.C.A.R.</h1>
 					<p style="font-size:0.8em; opacity:0.9;">An Edge-native, locally-hosted AI intelligence designed for strict hardware constraints.</p>
-					<img src="file:///C:/Users/ralth/.gemini/antigravity/brain/5be88f9c-a4b7-4a56-98c1-bd38ccc692f7/oscar_hero_image_1776063787265.png" alt="O.S.C.A.R. AI Core" class="hero-img">
+					<img src="assets/presentation/oscar_hero_image.png" alt="O.S.C.A.R. AI Core" class="hero-img">
 					<p style="font-size: 0.5em; color: var(--primary); animation: pulse 2s infinite;"><small>Use arrows to navigate &rarr;</small></p>
+					</div>
 				</section>
 
 				<!-- Slide 2: What is It? -->
-				<section>
+				<section data-title="What Is It">
+					<div class="slide-shell">
 					<div class="glass-card">
 						<h2>What is O.S.C.A.R.?</h2>
 						<p style="font-size:0.75em; line-height:1.4;">A fully offline agentic system that transforms a constrained computer into a multimodal interactive hub without relying on cloud services.</p>
 						<br>
 						<ul class="feature-list" style="margin-left:0; padding-left:0;">
-							<li><strong>🔒 Offline-First:</strong> Runs entirely without cloud APIs. Privacy is mathematically guaranteed.</li>
-							<li><strong>💻 Constraint-Resilient:</strong> Engineered specifically for typical hardware like Intel i3, 16GB RAM, and 0 GPUs.</li>
-							<li><strong>🌐 Sensory Aware:</strong> Fuses Vision (Camera), Audio (Mic), and Desktop UI context natively into a single reasoning loop.</li>
+							<li><strong>🔒 Offline-First:</strong> Built around local models, local databases, and on-device routing with no required cloud path.</li>
+							<li><strong>💻 Constraint-Resilient:</strong> Designed for modest Windows laptop hardware with CPU-first inference and deterministic fallbacks.</li>
+							<li><strong>🌐 Multimodal Orchestrator:</strong> Combines gestures, wake-word-triggered audio capture, screenshots, and OCR history inside one local control loop.</li>
 						</ul>
+					</div>
 					</div>
 				</section>
 
 				<!-- Slide 3: System Architecture (Part 1) -->
-				<section>
+				<section data-title="Core Subsystems 1">
+					<div class="slide-shell">
 					<h2 style="font-size:1.5em; margin-bottom: 20px;">The Core Subsystems <span style="opacity:0.5; font-size:0.5em;">(1/2)</span></h2>
 					<div class="grid-2">
 						<div class="glass-card">
 							<span class="icon">🧠</span>
 							<h3 style="font-size:1.1em;">BRAIN (Planner)</h3>
-							<p style="font-size:0.55em; line-height: 1.3;">Local OpenVINO LLM / Gemma 4 (4-bit GGUF). Employs deterministic fallback planning and routes intense tasks to external edge AIBOX hardware.</p>
+							<p style="font-size:0.55em; line-height: 1.3;">Structured action planner with deterministic fallbacks. The active profile targets a local Ollama-hosted Gemma model, with optional CPU-local model loading paths retained in the codebase.</p>
 						</div>
 						<div class="glass-card">
 							<span class="icon">👁️</span>
 							<h3 style="font-size:1.1em;">EYES (Vision)</h3>
-							<p style="font-size:0.55em; line-height: 1.3;">Continuous MediaPipe Tasks Hand & Face Tracking. Native understanding of nods, head shakes, vertical scrolling, and pinch-to-click gestures.</p>
+							<p style="font-size:0.55em; line-height: 1.3;">Continuous MediaPipe Tasks hand and face tracking with startup calibration, pinch-to-click, vertical scroll gestures, and head-pose-based yes/no detection logic.</p>
 						</div>
+					</div>
 					</div>
 				</section>
 
 				<!-- Slide 4: System Architecture (Part 2) -->
-				<section>
+				<section data-title="Core Subsystems 2">
+					<div class="slide-shell">
 					<h2 style="font-size:1.5em; margin-bottom: 20px;">The Core Subsystems <span style="opacity:0.5; font-size:0.5em;">(2/2)</span></h2>
 					<div class="grid-2">
 						<div class="glass-card">
 							<span class="icon">👂</span>
 							<h3 style="font-size:1.1em;">EARS (Hearing)</h3>
-							<p style="font-size:0.55em; line-height: 1.3;">Offline Acoustic processing using OpenWakeWord & Faster-Whisper tiny to instantly transcribe voice commands into actionable pipelines.</p>
+							<p style="font-size:0.55em; line-height: 1.3;">Local wake-word listening and raw utterance capture are implemented through openWakeWord. The STT path is scaffolded for Faster-Whisper-style local transcription and still needs end-to-end validation on device.</p>
 						</div>
 						<div class="glass-card">
 							<span class="icon">⚡</span>
 							<h3 style="font-size:1.1em;">VOICE & ACTION</h3>
-							<p style="font-size:0.55em; line-height: 1.3;">Piper TTS for responsive local speech synthesis paired with PyAutoGUI & deep active-window macros for direct, zero-delay desktop maneuvering.</p>
+							<p style="font-size:0.55em; line-height: 1.3;">Threaded action dispatch uses PyAutoGUI-backed desktop controls and app-aware shortcuts. A Piper voice layer exists as an optional local output path with text fallback when not configured.</p>
 						</div>
+					</div>
 					</div>
 				</section>
 
 				<!-- Slide 5: GenAI: The Local Brain -->
-				<section>
+				<section data-title="GenAI Brain">
+					<div class="slide-shell">
 					<div class="glass-card">
 						<span class="badge">AGENTIC REASONING</span>
 						<h2>GenAI: The Local Brain</h2>
@@ -159,18 +364,20 @@
 							<div style="text-align: left;">
 								<p style="font-size: 0.6em; line-height: 1.4;">Powering the "Brain" module with high-speed, local LLM execution:</p>
 								<ul class="feature-list" style="font-size: 0.5em;">
-									<li><strong>⚡ Llama 3.2 1B (OpenVINO):</strong> Optimized for Intel hardware to provide near-instant planning.</li>
+									<li><strong>⚡ Active local model profile:</strong> Current runtime is configured around a local Ollama-served Gemma profile, with smaller CPU-local model paths available for experimentation.</li>
 									<li><strong>📜 Structured Outputs:</strong> Enforces strict JSON schemas for reliable desktop action sequences.</li>
-									<li><strong>🔄 Fallback Intelligence:</strong> Dynamic switching between GenAI and deterministic heuristics to ensure 100% uptime.</li>
+									<li><strong>🔄 Fallback Intelligence:</strong> If the model path is unavailable or returns invalid output, OSCAR falls back to deterministic action planning instead of stalling the pipeline.</li>
 								</ul>
 							</div>
-							<img src="file:///C:/Users/ralth/.gemini/antigravity/brain/5be88f9c-a4b7-4a56-98c1-bd38ccc692f7/oscar_vlm_genai_graphic_1776064127575.png" alt="OSCAR Brain" class="hero-img" style="max-height: 250px !important;">
+							<img src="assets/presentation/oscar_vlm_genai_graphic.png" alt="OSCAR Brain" class="hero-img" style="max-height: 250px !important;">
 						</div>
+					</div>
 					</div>
 				</section>
 
 				<!-- Slide 6: VLM & Multimodal Intelligence -->
-				<section>
+				<section data-title="VLM Multimodal">
+					<div class="slide-shell">
 					<div class="glass-card">
 						<span class="badge">SENSORY FUSION</span>
 						<h2>VLM & Multimodal</h2>
@@ -178,31 +385,35 @@
 						<div class="grid-2">
 							<div class="glass-card" style="padding: 15px; background: rgba(0, 210, 255, 0.05);">
 								<h3 style="font-size: 0.8em;">Visual Scene Understanding</h3>
-								<p style="font-size: 0.5em;">Moondream integration allows OSCAR to "see" your workspace, identify objects, and read physical text through the webcam.</p>
+								<p style="font-size: 0.5em;">The current visual route captures screenshots and can forward them to a local vision-capable backend when one is configured. It is not yet a fully validated live webcam VLM stack.</p>
 							</div>
 							<div class="glass-card" style="padding: 15px; background: rgba(58, 123, 213, 0.05);">
 								<h3 style="font-size: 0.8em;">Multimodal Routing</h3>
-								<p style="font-size: 0.5em;">Intelligently routes queries: "What is this?" (Vision VLM) vs "Open Chrome" (Direct Action) vs "Find my emails" (Screenpipe Memory).</p>
+								<p style="font-size: 0.5em;">Routes between direct desktop actions, screenshot-assisted inference, and local OCR history lookup depending on what signal is available in the current interaction.</p>
 							</div>
 						</div>
+					</div>
 					</div>
 				</section>
 
 				<!-- Slide 7: Standout Features -->
-				<section>
+				<section data-title="Key Capabilities">
+					<div class="slide-shell">
 					<h2>Key Capabilities</h2>
 					<div class="glass-card">
 						<ul class="feature-list" style="margin-left:0; padding-left:0;">
-							<li><strong>🔄 Seamless Fallback Engine:</strong> Intelligently switches between rapid active-window macros, lightweight heuristic parsing, and the GenAI planner to eliminate latency.</li>
-							<li><strong>✋ Non-blocking Hardware Loop:</strong> Interact solely via webcam. Hands-free and mouse-free operation enabled by asynchronous action queues.</li>
-							<li><strong>🕰️ Screenpipe Memory:</strong> Integrated retrospective lookups. OSCAR queries a local SQLite OCR database to recall what was on your screen hours ago.</li>
-							<li><strong>🛠️ App-Aware Command Macros:</strong> Knows what window is under your cursor. Commands like 'scroll down' immediately execute without bogging down the LLM.</li>
+							<li><strong>🔄 Fallback Engine:</strong> Preserves responsiveness by favoring direct actions and deterministic planning when the model path is unavailable or unnecessary.</li>
+							<li><strong>✋ Gesture-First Interaction:</strong> Live gesture control is implemented with calibration, cooldown handling, and asynchronous action dispatch. Head yes/no exists in logic but is still being tuned for reliable UX.</li>
+							<li><strong>🕰️ OCR Memory Route:</strong> OSCAR can query a local SQLite OCR history store for retrospective lookup when a valid local database is present.</li>
+							<li><strong>🛠️ Desktop Control Layer:</strong> Click, scroll, keypress, hotkey, and text-entry actions are exposed through a threaded controller that can also run in sandbox-only mode.</li>
 						</ul>
+					</div>
 					</div>
 				</section>
 
 				<!-- Slide 8: Interactive Performance Simulation -->
-				<section>
+				<section data-title="Simulation">
+					<div class="slide-shell">
 					<div class="glass-card" style="max-height: 85vh; padding: 20px;">
 						<span class="badge" style="background: linear-gradient(135deg, #ff007b, #fbff00); -webkit-text-fill-color: black;">LIVE SIMULATION v2</span>
 						<h2 style="font-size: 1.1em; margin-bottom: 10px;">OSCAR System Pipeline</h2>
@@ -219,7 +430,7 @@
 							<!-- Visual Animation Area -->
 							<div id="sim-viewport" style="position: relative; height: 400px; border-radius: 15px; overflow: hidden; border: 1px solid rgba(0, 210, 255, 0.2); background: #050a10;">
 								<!-- Base Image -->
-								<img src="file:///C:/Users/ralth/.gemini/antigravity/brain/5be88f9c-a4b7-4a56-98c1-bd38ccc692f7/oscar_user_animation_base_1776064385550.png" 
+								<img src="assets/presentation/oscar_user_animation_base.png" 
 									 style="width: 100%; height: 100%; object-fit: cover; opacity: 0.6; filter: brightness(0.7);">
 								
 								<!-- UI Overlays (Positioned on the mock monitors) -->
@@ -339,20 +550,20 @@
 							const sequence = [];
 							if (type === 'voice') {
 								sequence.push(() => { voiceBubble.classList.add('active'); log('USER: "Hey Oscar..."'); });
-								sequence.push(() => { indicators.ears.className = 'sim-dot active processing'; log('LISTEN: openwakeword.ONNX'); });
-								sequence.push(() => { log('STT: faster-whisper (tiny)'); });
-								sequence.push(() => { indicators.brain.className = 'sim-dot active processing'; log('PLAN: Route -> Launch App'); });
+								sequence.push(() => { indicators.ears.className = 'sim-dot active processing'; log('LISTEN: openwakeword local model'); });
+								sequence.push(() => { log('CAPTURE: utterance buffer'); });
+								sequence.push(() => { indicators.brain.className = 'sim-dot active processing'; log('PLAN: structured action route'); });
 								sequence.push(() => { indicators.action.className = 'sim-dot active processing'; log('EXEC: Popen(["chrome.exe"])'); });
 							} else if (type === 'gesture') {
 								sequence.push(() => { gestureIcon.classList.add('active'); log('USER: [Hand Pinch Detected]'); });
-								sequence.push(() => { indicators.vision.className = 'sim-dot active processing'; log('EYES: Landmark detection...'); });
-								sequence.push(() => { indicators.brain.className = 'sim-dot active'; log('ROUTE: Fast-track (Macro)'); });
-								sequence.push(() => { indicators.action.className = 'sim-dot active processing'; log('EXEC: Win32 PostMessage Click'); });
+								sequence.push(() => { indicators.vision.className = 'sim-dot active processing'; log('EYES: Hand landmarks + calibration'); });
+								sequence.push(() => { indicators.brain.className = 'sim-dot active'; log('ROUTE: direct gesture action'); });
+								sequence.push(() => { indicators.action.className = 'sim-dot active processing'; log('EXEC: controller.click()'); });
 							} else if (type === 'memory') {
 								sequence.push(() => { voiceBubble.innerHTML = '"What did I see?"'; voiceBubble.classList.add('active'); log('USER: Query screen history'); });
-								sequence.push(() => { indicators.brain.className = 'sim-dot active processing'; log('BRAIN: Search SQLite OCR'); });
+								sequence.push(() => { indicators.brain.className = 'sim-dot active processing'; log('BRAIN: Search local SQLite OCR'); });
 								sequence.push(() => { indicators.brain.className = 'sim-dot active'; log('MATCH: "presentation.html"'); });
-								sequence.push(() => { indicators.action.className = 'sim-dot active processing'; log('TTS: Piper synth start'); });
+								sequence.push(() => { indicators.action.className = 'sim-dot active processing'; log('RESPOND: text / optional voice'); });
 							}
 
 							sequence.push(() => { 
@@ -370,10 +581,12 @@
 							});
 						}
 					</script>
+					</div>
 				</section>
 
 				<!-- Slide 9: Technology Stack -->
-				<section>
+				<section data-title="Tech Stack">
+					<div class="slide-shell">
 					<div class="glass-card">
 						<span class="badge">THE EDGE ENGINE</span>
 						<h2>Tech Stack</h2>
@@ -381,27 +594,29 @@
 							<div style="text-align: left;">
 								<h3 style="font-size: 1em; color: var(--primary);">Models & AI</h3>
 								<ul class="feature-list">
-									<li><strong>🧠 Llama 3.2 1B:</strong> LLM optimized via OpenVINO.</li>
-									<li><strong>👁️ Moondream:</strong> VLM for visual scene analysis.</li>
-									<li><strong>👂 Faster-Whisper:</strong> Efficient local transcription.</li>
-									<li><strong>🗣️ Piper:</strong> Low-latency neural speech synthesis.</li>
+									<li><strong>🧠 Local LLM profile:</strong> Ollama-served Gemma profile in current config, with optional smaller CPU-local model paths in code.</li>
+									<li><strong>👁️ Vision backend seam:</strong> Screenshot-to-model routing is implemented when a local vision-capable backend is available.</li>
+									<li><strong>👂 openWakeWord:</strong> Local wake-word detection and utterance capture.</li>
+									<li><strong>🗣️ Piper:</strong> Optional local speech output with text fallback.</li>
 								</ul>
 							</div>
 							<div style="text-align: left;">
 								<h3 style="font-size: 1em; color: var(--primary);">Core Infrastructure</h3>
 								<ul class="feature-list">
-									<li><strong>💻 Python 3.13:</strong> High-performance async runtime.</li>
-									<li><strong>🖼️ MediaPipe:</strong> Real-time hand/face tracking.</li>
-									<li><strong>🗄️ Screenpipe:</strong> Retrospective memory (SQLite/OCR).</li>
-									<li><strong>⚙️ PyAutoGUI:</strong> Cross-platform desktop automation.</li>
+									<li><strong>💻 Python 3.13:</strong> Local orchestrator runtime.</li>
+									<li><strong>🖼️ MediaPipe Tasks:</strong> Hand and face landmark tracking.</li>
+									<li><strong>🗄️ SQLite OCR history:</strong> Local retrospective lookup path compatible with Screenpipe-style data.</li>
+									<li><strong>⚙️ PyAutoGUI:</strong> Desktop automation and screenshot capture.</li>
 								</ul>
 							</div>
 						</div>
 					</div>
+					</div>
 				</section>
 
 				<!-- Slide 10: System Architecture Diagram -->
-				<section data-background-image="file:///C:/Users/ralth/.gemini/antigravity/brain/5be88f9c-a4b7-4a56-98c1-bd38ccc692f7/oscar_tech_diagram_background_1776064590808.png" data-background-opacity="0.3">
+				<section data-title="Architecture" data-bg-image="assets/presentation/oscar_tech_diagram_background.png">
+					<div class="slide-shell">
 					<div class="glass-card" style="background: rgba(10, 10, 15, 0.8);">
 						<h2>Architecture Diagram</h2>
 						<div class="architecture-flow" style="display: flex; justify-content: space-around; align-items: center; height: 300px; position: relative;">
@@ -443,50 +658,146 @@
 						.arch-node span { font-size: 0.7em; }
 						.arch-node small { font-size: 0.4em; opacity: 0.7; margin-top: 5px; }
 					</style>
+					</div>
 				</section>
 
 				<!-- Slide 11: Detailed Use-cases -->
-				<section>
+				<section data-title="Use Cases">
+					<div class="slide-shell">
 					<h2>OSCAR in Action</h2>
 					<div class="grid-2" style="grid-template-columns: 1fr 1fr 1fr; gap: 10px;">
 						<div class="glass-card" style="padding: 15px;">
 							<h3 style="font-size: 0.8em; color: var(--primary);">Accessibility</h3>
-							<p style="font-size: 0.45em;">Empowering users with limited mobility to control their entire workstation via head-nods and voice alone.</p>
+							<p style="font-size: 0.45em;">Gesture-first desktop control creates a practical base for accessibility-focused workstation interaction, with head-confirmation logic under active tuning.</p>
 						</div>
 						<div class="glass-card" style="padding: 15px;">
 							<h3 style="font-size: 0.8em; color: var(--primary);">Developer Flow</h3>
-							<p style="font-size: 0.45em;">"Zero-context-switch" assistance. Scroll docs, query terminal logs, or launch builds without touching the mouse.</p>
+							<p style="font-size: 0.45em;">Screenshot capture, OCR recall, and direct desktop actions support low-friction local assistance without depending on remote services.</p>
 						</div>
 						<div class="glass-card" style="padding: 15px;">
 							<h3 style="font-size: 0.8em; color: var(--primary);">Corporate Privacy</h3>
-							<p style="font-size: 0.45em;">Process sensitive data and internal company tools behind air-gapped environments with 100% local intelligence.</p>
+							<p style="font-size: 0.45em;">The architecture is aimed at privacy-sensitive and air-gapped workflows by preferring local models, local automation, and local data sources.</p>
 						</div>
+					</div>
 					</div>
 				</section>
 
 				<!-- Slide 12: Why it Matters -->
-				<section>
+				<section data-title="Why It Matters">
+					<div class="slide-shell">
 					<div class="glass-card" style="border-color: var(--primary);">
 						<h2>Why it Matters</h2>
-						<p style="font-size:0.8em; line-height: 1.6; font-style: italic;">By combining the sheer efficiency of quantized intelligence with a deterministic pipeline of lightweight computer vision and desktop automation, Project O.S.C.A.R. successfully bridges the gap between total privacy, extreme hardware limits, and next-generation agentic computing.</p>
+						<p style="font-size:0.8em; line-height: 1.6; font-style: italic;">Project O.S.C.A.R. shows how far a local-first assistant can go by combining calibrated gesture input, wake-word-triggered audio capture, screenshot context, OCR memory, and deterministic desktop control inside one offline-oriented runtime.</p>
 						<br>
 						<h3 style="color: var(--primary);">The future is Local.</h3>
+					</div>
 					</div>
 				</section>
 
 			</div>
 		</div>
 
-		<script src="https://cdnjs.cloudflare.com/ajax/libs/reveal.js/4.3.1/reveal.min.js"></script>
+		<div class="overview" id="overview">
+			<div class="overview-grid" id="overview-grid"></div>
+		</div>
+		<div class="deck-nav">
+			<div class="nav-group">
+				<button type="button" class="nav-btn" id="prev-slide">← Prev</button>
+				<button type="button" class="nav-btn" id="next-slide">Next →</button>
+			</div>
+			<div class="progress-shell" aria-hidden="true">
+				<div class="progress-bar" id="progress-bar"></div>
+			</div>
+			<div class="slide-counter" id="slide-counter">1 / 12</div>
+		</div>
 		<script>
-			Reveal.initialize({
-				hash: true,
-				transition: 'zoom', // none/fade/slide/convex/concave/zoom
-				backgroundTransition: 'fade',
-				controls: true,
-				progress: true,
-				center: true,
-			});
+			(() => {
+				const slides = Array.from(document.querySelectorAll('.slides > section'));
+				const counter = document.getElementById('slide-counter');
+				const progressBar = document.getElementById('progress-bar');
+				const overview = document.getElementById('overview');
+				const overviewGrid = document.getElementById('overview-grid');
+				const overviewToggle = document.getElementById('overview-toggle');
+				const prevButton = document.getElementById('prev-slide');
+				const nextButton = document.getElementById('next-slide');
+
+				slides.forEach((slide, index) => {
+					const background = slide.dataset.bgImage;
+					if (background) {
+						slide.style.backgroundImage = `url("${background}")`;
+					}
+
+					const card = document.createElement('button');
+					card.type = 'button';
+					card.className = 'overview-card';
+					card.innerHTML = `<strong>${index + 1}. ${slide.dataset.title || `Slide ${index + 1}`}</strong><span>Jump directly to this section.</span>`;
+					card.addEventListener('click', () => {
+						overview.classList.remove('open');
+						goTo(index);
+					});
+					overviewGrid.appendChild(card);
+				});
+
+				const clampIndex = (index) => Math.max(0, Math.min(index, slides.length - 1));
+
+				const currentFromHash = () => {
+					const parsed = Number.parseInt(window.location.hash.replace('#slide-', ''), 10);
+					return Number.isFinite(parsed) ? clampIndex(parsed - 1) : 0;
+				};
+
+				const updateSlide = (index) => {
+					slides.forEach((slide, slideIndex) => {
+						slide.classList.toggle('active', slideIndex === index);
+					});
+					counter.textContent = `${index + 1} / ${slides.length}`;
+					progressBar.style.width = `${((index + 1) / slides.length) * 100}%`;
+					window.location.hash = `slide-${index + 1}`;
+					prevButton.disabled = index === 0;
+					nextButton.disabled = index === slides.length - 1;
+				};
+
+				let currentIndex = currentFromHash();
+
+				const goTo = (index) => {
+					currentIndex = clampIndex(index);
+					updateSlide(currentIndex);
+				};
+
+				prevButton.addEventListener('click', () => goTo(currentIndex - 1));
+				nextButton.addEventListener('click', () => goTo(currentIndex + 1));
+				overviewToggle.addEventListener('click', () => {
+					overview.classList.toggle('open');
+				});
+				overview.addEventListener('click', (event) => {
+					if (event.target === overview) {
+						overview.classList.remove('open');
+					}
+				});
+
+				window.addEventListener('keydown', (event) => {
+					if (overview.classList.contains('open') && event.key === 'Escape') {
+						overview.classList.remove('open');
+						return;
+					}
+					if (event.key === 'ArrowRight' || event.key === 'PageDown' || event.key === ' ') {
+						event.preventDefault();
+						goTo(currentIndex + 1);
+					}
+					if (event.key === 'ArrowLeft' || event.key === 'PageUp') {
+						event.preventDefault();
+						goTo(currentIndex - 1);
+					}
+					if (event.key.toLowerCase() === 'o') {
+						overview.classList.toggle('open');
+					}
+				});
+
+				window.addEventListener('hashchange', () => {
+					goTo(currentFromHash());
+				});
+
+				updateSlide(currentIndex);
+			})();
 		</script>
 		<style>
 			@keyframes pulse {

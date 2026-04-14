@@ -32,7 +32,7 @@ class BrainPlannerTests(unittest.TestCase):
     def test_reports_missing_openvino_model_as_unloaded(self) -> None:
         brain = Brain(
             prompt_template_path="config/prompt_template.txt",
-            model_path=Path("models") / "missing-gemma",
+            model_path=Path("models") / "missing-local-model",
         )
         diagnostics = brain.diagnostics()
         self.assertFalse(diagnostics["model_path_exists"])
@@ -41,11 +41,37 @@ class BrainPlannerTests(unittest.TestCase):
         brain = Brain(
             prompt_template_path="config/prompt_template.txt",
             infer_backend=lambda _prompt, _screenshot, _audio, _rate: '{"action":"click","value":null}',
-            model_path=Path("models") / "missing-gemma",
+            model_path=Path("models") / "missing-local-model",
         )
         response = brain.infer_action(audio_samples=None, sample_rate=16000, screenshot_path=None, ocr_history="")
         self.assertEqual("click", response.action)
         self.assertIsNone(response.value)
+
+    def test_transcript_fallback_handles_scroll_command(self) -> None:
+        response = self.brain.infer_action(
+            audio_samples=None,
+            sample_rate=16000,
+            screenshot_path=None,
+            ocr_history="",
+            transcript="scroll down",
+        )
+        self.assertEqual("scroll", response.action)
+        self.assertEqual(-600, response.value)
+
+    def test_falling_backend_errors_degrade_to_deterministic_fallback(self) -> None:
+        brain = Brain(
+            prompt_template_path="config/prompt_template.txt",
+            infer_backend=lambda *_args, **_kwargs: (_ for _ in ()).throw(ConnectionError("backend down")),
+        )
+        response = brain.infer_action(
+            audio_samples=None,
+            sample_rate=16000,
+            screenshot_path=None,
+            ocr_history="",
+            transcript="press enter",
+        )
+        self.assertEqual("press_key", response.action)
+        self.assertEqual("enter", response.value)
 
 
 if __name__ == "__main__":

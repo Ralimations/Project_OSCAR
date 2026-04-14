@@ -212,3 +212,30 @@ Current runtime verification
 - Verified that core/brain.py now reports the OpenVINO backend as loaded against the local model path.
 - Strengthened the prompt template with explicit action vocabulary and JSON-only examples to improve small-model planning reliability.
 - Kept the deterministic fallback planner in place so invalid or unusable model output does not break the orchestration path.
+
+2026-04-14 - Deterministic-first routing refactor for low-end laptop performance
+- Reworked the orchestrator so transcript requests now take the cheapest reliable route first instead of paying the full screenshot + OCR + model path every time.
+- Expanded core/router.py with more direct commands, transcript intent classification, and stronger deterministic routing for common proof-of-concept actions.
+- Restored app-macro routing through active-window matching so configured app shortcuts can execute without touching the planner.
+- Added transcript-aware fallback planning in core/brain.py so the model path is reserved for ambiguous requests instead of ordinary commands.
+- Wired speak actions back into the runtime through core/voice.py and ActionController handler registration.
+- Added transcript injection support to core/ears.py so text-driven testing and push-to-talk style flows can use the same orchestrator path.
+- Updated the test suite to cover direct transcript routing, macro routing, OCR-memory speaking, planner fallback, and transcript event delivery.
+- Verified the refactor with the embedded interpreter: 29 tests passing.
+
+2026-04-14 - Phase 1/2 low-latency tooling and two-hand gesture support
+- Expanded the direct command router with more browser/navigation shortcuts so common proof-of-concept commands avoid the planner entirely.
+- Added route-level latency logging inside the orchestrator to make it easier to see which path is consuming time on the HP 14s hardware.
+- Added `scripts/transcript_harness.py` so OSCAR can be exercised from typed transcript input without waiting on live STT tuning.
+- Upgraded the MediaPipe hand path from one tracked hand to configurable multi-hand tracking.
+- Added stateful two-hand zoom gesture detection in core/eyes.py using inter-hand distance changes over time.
+- Mapped two-hand zoom to configurable hotkeys through settings.yaml instead of introducing a separate heavy gesture action layer.
+- Updated tests for router behavior and the new zoom gesture path.
+
+2026-04-14 - Default planner moved to a repo-local small model
+- Added a `small_local` profile in `config/settings.yaml` and made it the default active model profile.
+- Updated `main.py` so runtime setup and startup downloads respect the active profile's model path instead of relying on the legacy top-level Gemma field.
+- Expanded `core/brain.py` to load a local Transformers causal language model directly from a repo folder when the model files are present.
+- Updated `scripts/download_models.py` to download `HuggingFaceTB/SmolLM2-360M-Instruct` into `models/smollm2-360m-instruct`.
+- Changed the non-Ollama startup bootstrap to skip Ollama pulls and focus on the repo-local asset path.
+- Kept deterministic routing first so the small model only handles requests that are not covered by direct commands, app macros, memory lookup, or visual-question routing.

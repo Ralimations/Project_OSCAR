@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import logging
+import os
 import queue
+import shutil
 import subprocess
 import threading
 import time
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Callable
 
 try:
@@ -15,6 +18,20 @@ except ImportError:  # pragma: no cover - optional dependency
 
 
 LOGGER = logging.getLogger(__name__)
+KNOWN_APP_PATHS: dict[str, list[str]] = {
+    "brave": [
+        r"C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe",
+        r"C:\Program Files (x86)\BraveSoftware\Brave-Browser\Application\brave.exe",
+    ],
+    "telegram": [
+        str(Path.home() / "AppData/Roaming/Microsoft/Windows/Start Menu/Programs/Telegram Desktop/Telegram.lnk"),
+        str(Path.home() / "AppData/Local/Programs/Telegram Desktop/Telegram.exe"),
+        str(Path.home() / "AppData/Roaming/Telegram Desktop/Telegram.exe"),
+    ],
+    "notepad": [
+        r"C:\Windows\System32\notepad.exe",
+    ],
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -110,12 +127,39 @@ class ActionController:
             LOGGER.info("Simulated app launch: %s", command)
             return
         if isinstance(command, str):
-            subprocess.Popen(command, shell=True)
+            resolved = self._resolve_app_command(command)
+            self._launch_windows_target(resolved)
             return
         if isinstance(command, (list, tuple)):
             subprocess.Popen(list(command), shell=False)
             return
         raise TypeError("open_app requires a command string or argv list.")
+
+    def _resolve_app_command(self, command: str) -> str:
+        normalized = command.strip()
+        lowered = normalized.lower()
+
+        if os.path.exists(normalized):
+            return normalized
+
+        if shutil.which(normalized):
+            return normalized
+
+        candidates = KNOWN_APP_PATHS.get(lowered, [])
+        for candidate in candidates:
+            if os.path.exists(candidate):
+                return candidate
+
+        return normalized
+
+    def _launch_windows_target(self, target: str) -> None:
+        if os.name == "nt":
+            if os.path.exists(target):
+                os.startfile(target)  # type: ignore[attr-defined]
+                return
+            subprocess.Popen(["cmd", "/c", "start", "", target], shell=False)
+            return
+        subprocess.Popen(target, shell=True)
 
     def _write_text(self, text: Any) -> None:
         if pyautogui is None or self._dry_run:

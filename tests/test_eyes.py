@@ -6,9 +6,13 @@ from core.eyes import Eyes, HeadPose, Point
 SETTINGS = {
     "dormant_fps": 15,
     "gesture_cooldown_ms": 200,
+    "max_hands": 2,
     "pinch_threshold": 0.045,
     "scroll_deadzone": 0.03,
     "scroll_scale": 1200,
+    "zoom_distance_threshold": 0.08,
+    "zoom_hotkey_in": ["ctrl", "+"],
+    "zoom_hotkey_out": ["ctrl", "-"],
     "nod_threshold": 12,
     "shake_threshold": 18,
     "hand_landmarker_task_path": "models/mediapipe/hand_landmarker.task",
@@ -41,6 +45,22 @@ class EyesGestureTests(unittest.TestCase):
         self.assertIsNotNone(event)
         self.assertEqual("scroll", event.action)
         self.assertLess(event.value, 0)
+
+    def test_detects_zoom_in_from_two_hands_moving_apart(self) -> None:
+        initial = [
+            {0: Point(x=0.30, y=0.50), 5: Point(x=0.32, y=0.45), 9: Point(x=0.34, y=0.50), 13: Point(x=0.32, y=0.55), 17: Point(x=0.28, y=0.55)},
+            {0: Point(x=0.60, y=0.50), 5: Point(x=0.58, y=0.45), 9: Point(x=0.56, y=0.50), 13: Point(x=0.58, y=0.55), 17: Point(x=0.62, y=0.55)},
+        ]
+        moved = [
+            {0: Point(x=0.20, y=0.50), 5: Point(x=0.22, y=0.45), 9: Point(x=0.24, y=0.50), 13: Point(x=0.22, y=0.55), 17: Point(x=0.18, y=0.55)},
+            {0: Point(x=0.70, y=0.50), 5: Point(x=0.68, y=0.45), 9: Point(x=0.66, y=0.50), 13: Point(x=0.68, y=0.55), 17: Point(x=0.72, y=0.55)},
+        ]
+        self.assertIsNone(self.eyes._detect_zoom(initial))
+        event = self.eyes._detect_zoom(moved)
+        self.assertIsNotNone(event)
+        self.assertEqual("zoom_in", event.name)
+        self.assertEqual("hotkey", event.action)
+        self.assertEqual(["ctrl", "+"], event.value)
 
     def test_detects_head_nod_confirmation(self) -> None:
         event = self.eyes.interpret_observation(head_pose=HeadPose(pitch=15.0))

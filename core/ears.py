@@ -31,6 +31,7 @@ class AudioCaptureEvent:
     audio_samples: object
     sample_rate: int
     source: str = "wake_word"
+    transcript: str | None = None
 
 
 class Ears:
@@ -86,8 +87,18 @@ class Ears:
             "audio_input_device": self._input_device if self._input_device is not None else "default",
         }
 
-    def inject_audio_capture(self, audio_samples, source: str = "wake_word") -> None:
-        self._queue.put(AudioCaptureEvent(audio_samples=audio_samples, sample_rate=self._sample_rate, source=source))
+    def inject_audio_capture(self, audio_samples, source: str = "wake_word", transcript: str | None = None) -> None:
+        self._queue.put(
+            AudioCaptureEvent(
+                audio_samples=audio_samples,
+                sample_rate=self._sample_rate,
+                source=source,
+                transcript=transcript,
+            )
+        )
+
+    def inject_transcript(self, transcript: str, source: str = "transcript") -> None:
+        self.inject_audio_capture(audio_samples=[], source=source, transcript=transcript)
 
     def detect_wake_word(self, audio_chunk) -> bool:
         if self._wake_word_model is None or np is None:

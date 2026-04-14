@@ -5,7 +5,7 @@ import queue
 import threading
 import time
 from dataclasses import dataclass, field
-from typing import Iterable
+from typing import Callable, Iterable
 
 try:
     import cv2  # type: ignore
@@ -37,9 +37,15 @@ class SandboxState:
 class DevOverlay:
     """Development-only UI for reviewing gesture tracking and sandboxed actions."""
 
-    def __init__(self, tracking_window: bool = True, sandbox_window: bool = True) -> None:
+    def __init__(
+        self,
+        tracking_window: bool = True,
+        sandbox_window: bool = True,
+        on_close: Callable[[], None] | None = None,
+    ) -> None:
         self._tracking_window = tracking_window
         self._sandbox_window = sandbox_window
+        self._on_close = on_close
         self._stop_event = threading.Event()
         self._thread = threading.Thread(target=self._run, name="oscar-dev-overlay", daemon=True)
         self._tracking_frame = None
@@ -47,6 +53,9 @@ class DevOverlay:
         self._lock = threading.Lock()
         self._events: queue.Queue[tuple[str, object]] = queue.Queue()
         self._started = False
+        self._close_notified = False
+        self._tracking_window_shown = False
+        self._sandbox_window_shown = False
 
     def start(self) -> None:
         if self._started or cv2 is None or np is None:
@@ -61,13 +70,13 @@ class DevOverlay:
             return
         self._stop_event.set()
         self._events.put(("shutdown", None))
-        if self._thread.is_alive():
+        if self._thread.is_alive() and threading.current_thread() is not self._thread:
             self._thread.join(timeout=2.0)
 
     def update_tracking(
         self,
         frame,
-        hand_landmarks: dict[int, tuple[int, int]] | None,
+        hand_landmarks: list[dict[int, tuple[int, int]]] | None,
         face_landmarks: list[tuple[int, int]] | None,
         event_name: str | None,
         calibration_step: str,
@@ -82,15 +91,18 @@ class DevOverlay:
             for x, y in face_landmarks:
                 cv2.circle(display, (x, y), 1, (120, 255, 120), -1)
         if hand_landmarks:
-            for index, (x, y) in hand_landmarks.items():
-                radius = 6 if index in {4, 8, 12} else 3
-                color = (0, 255, 255) if index in {4, 8, 12} else (255, 180, 0)
-                cv2.circle(display, (x, y), radius, color, -1)
-            for key in (4, 8, 12):
-                if key in hand_landmarks:
-                    x, y = hand_landmarks[key]
-                    cv2.putText(display, str(key), (x + 6, y - 6), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255), 1)
-            index_tip = hand_landmarks.get(8)
+            colors = ((255, 180, 0), (80, 255, 160))
+            for hand_index, hand in enumerate(hand_landmarks):
+                base_color = colors[hand_index % len(colors)]
+                for index, (x, y) in hand.items():
+                    radius = 6 if index in {4, 8, 12} else 3
+                    color = (0, 255, 255) if index in {4, 8, 12} else base_color
+                    cv2.circle(display, (x, y), radius, color, -1)
+                for key in (4, 8, 12):
+                    if key in hand:
+                        x, y = hand[key]
+                        cv2.putText(display, f"{hand_index}:{key}", (x + 6, y - 6), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255), 1)
+            index_tip = hand_landmarks[0].get(8)
             if index_tip:
                 self._events.put(("cursor", index_tip))
         status = calibration_step if calibration_active else (event_name or "tracking")
@@ -120,26 +132,65 @@ class DevOverlay:
         self._events.put(("action", (action, value)))
 
     def _run(self) -> None:
-        while not self._stop_event.is_set():
+        try:
+            while not self._stop_event.is_set():
+                try:
+                    event_type, payload = self._events.get(timeout=0.03)
+                    self._apply_event(event_type, payload)
+                except queue.Empty:
+                    pass
+
+                if self._tracking_window:
+                    with self._lock:
+                        tracking_frame = None if self._tracking_frame is None else self._tracking_frame.copy()
+                    if tracking_frame is not None:
+                        cv2.imshow("OSCAR Tracking", tracking_frame)
+                        self._tracking_window_shown = True
+
+                if self._sandbox_window:
+                    cv2.imshow("OSCAR Sandbox", self._render_sandbox())
+                    self._sandbox_window_shown = True
+
+                key = cv2.waitKey(1) & 0xFF
+                if key in (27, ord("q"), ord("Q")):
+                    self._request_close()
+                    break
+
+                if self._tracking_window and self._tracking_window_shown and self._window_closed("OSCAR Tracking"):
+                    self._request_close()
+                    break
+                if self._sandbox_window and self._sandbox_window_shown and self._window_closed("OSCAR Sandbox"):
+                    self._request_close()
+                    break
+        except Exception:
+            LOGGER.exception("Dev overlay loop failed.")
+            self._request_close()
+        finally:
+            self._safe_destroy_window("OSCAR Tracking")
+            self._safe_destroy_window("OSCAR Sandbox")
+
+    def _window_closed(self, name: str) -> bool:
+        try:
+            return cv2.getWindowProperty(name, cv2.WND_PROP_VISIBLE) < 1
+        except Exception:
+            return True
+
+    def _safe_destroy_window(self, name: str) -> None:
+        try:
+            cv2.destroyWindow(name)
+        except Exception:
+            return
+
+    def _request_close(self) -> None:
+        self._stop_event.set()
+        if self._close_notified:
+            return
+        self._close_notified = True
+        if self._on_close is not None:
             try:
-                event_type, payload = self._events.get(timeout=0.03)
-                self._apply_event(event_type, payload)
-            except queue.Empty:
-                pass
-
-            if self._tracking_window:
-                with self._lock:
-                    tracking_frame = None if self._tracking_frame is None else self._tracking_frame.copy()
-                if tracking_frame is not None:
-                    cv2.imshow("OSCAR Tracking", tracking_frame)
-
-            if self._sandbox_window:
-                cv2.imshow("OSCAR Sandbox", self._render_sandbox())
-
-            cv2.waitKey(1)
-
-        cv2.destroyWindow("OSCAR Tracking")
-        cv2.destroyWindow("OSCAR Sandbox")
+                self._on_close()
+            except Exception:
+                LOGGER.exception("Dev overlay close callback failed.")
 
     def _apply_event(self, event_type: str, payload: object) -> None:
         now = time.monotonic()

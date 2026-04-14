@@ -22,6 +22,18 @@ class EarsTests(unittest.TestCase):
         diagnostics = ears.diagnostics()
         self.assertFalse(diagnostics["audio_capture_enabled"])
 
+    def test_injected_transcript_reaches_callback(self) -> None:
+        observed: queue.Queue[AudioCaptureEvent] = queue.Queue()
+        ears = Ears(on_audio_captured=lambda event: observed.put(event), audio_settings={"enabled": False})
+        ears.start()
+        try:
+            ears.inject_transcript("open notepad")
+            event = observed.get(timeout=1.0)
+            self.assertEqual("transcript", event.source)
+            self.assertEqual("open notepad", event.transcript)
+        finally:
+            ears.stop()
+
 
 if __name__ == "__main__":
     unittest.main()

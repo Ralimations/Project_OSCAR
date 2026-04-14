@@ -6,7 +6,7 @@ import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Iterable, Mapping
+from typing import Callable, Iterable, Mapping, Sequence
 
 try:
     import cv2  # type: ignore
@@ -74,7 +74,7 @@ def _distance(point_a: Point, point_b: Point) -> float:
 class GestureInterpreter:
     """Pure gesture math that can be unit-tested without camera dependencies."""
 
-    def __init__(self, settings: Mapping[str, float]) -> None:
+    def __init__(self, settings: Mapping[str, float | int | str | bool | Sequence[str]]) -> None:
         self._pinch_threshold = float(settings["pinch_threshold"])
         self._scroll_deadzone = float(settings["scroll_deadzone"])
         self._scroll_scale = float(settings["scroll_scale"])
@@ -83,15 +83,16 @@ class GestureInterpreter:
 
     def interpret(
         self,
-        hand_landmarks: Mapping[int, Point] | None = None,
+        hand_landmarks: Mapping[int, Point] | Sequence[Mapping[int, Point]] | None = None,
         head_pose: HeadPose | None = None,
     ) -> GestureEvent | None:
-        if hand_landmarks:
-            click_event = self._detect_click(hand_landmarks)
+        hands = self._normalize_hands(hand_landmarks)
+        for hand in hands:
+            click_event = self._detect_click(hand)
             if click_event:
                 return click_event
 
-            scroll_event = self._detect_scroll(hand_landmarks)
+            scroll_event = self._detect_scroll(hand)
             if scroll_event:
                 return scroll_event
 
@@ -102,6 +103,16 @@ class GestureInterpreter:
                 return GestureEvent(name="confirm_no", action="confirm", value="no")
 
         return None
+
+    def _normalize_hands(
+        self,
+        hand_landmarks: Mapping[int, Point] | Sequence[Mapping[int, Point]] | None,
+    ) -> list[Mapping[int, Point]]:
+        if hand_landmarks is None:
+            return []
+        if isinstance(hand_landmarks, Mapping):
+            return [hand_landmarks]
+        return [hand for hand in hand_landmarks if hand]
 
     def detect_open_hand(self, hand_landmarks: Mapping[int, Point] | None) -> bool:
         if not hand_landmarks:
@@ -175,7 +186,7 @@ class Eyes:
         settings: Mapping[str, float | int | str | bool],
         on_gesture: Callable[[GestureEvent], None],
         frame_source: Callable[[], Iterable[object]] | None = None,
-        frame_observer: Callable[[object, dict[int, tuple[int, int]] | None, str | None, CalibrationStatus], None] | None = None,
+        frame_observer: Callable[[object, list[dict[int, tuple[int, int]]] | None, list[tuple[int, int]] | None, str | None, CalibrationStatus, HeadPose | None], None] | None = None,
     ) -> None:
         self._fps = int(settings["dormant_fps"])
         self._cooldown_seconds = float(settings["gesture_cooldown_ms"]) / 1000.0
@@ -183,6 +194,10 @@ class Eyes:
         self._hand_landmarker_task_path = str(settings.get("hand_landmarker_task_path", ""))
         self._face_landmarker_task_path = str(settings.get("face_landmarker_task_path", ""))
         self._require_calibration = bool(settings.get("require_calibration", True))
+        self._max_hands = int(settings.get("max_hands", 2))
+        self._zoom_distance_threshold = float(settings.get("zoom_distance_threshold", 0.08))
+        self._zoom_hotkey_in = list(settings.get("zoom_hotkey_in", ["ctrl", "+"]))  # type: ignore[arg-type]
+        self._zoom_hotkey_out = list(settings.get("zoom_hotkey_out", ["ctrl", "-"]))  # type: ignore[arg-type]
         self._calibration_skip_steps = {
             str(step) for step in settings.get("calibration_skip_steps", [])  # type: ignore[arg-type]
         }
@@ -201,6 +216,7 @@ class Eyes:
         self._calibration_head_baseline: HeadPose | None = None
         self._motion_direction: str | None = None
         self._motion_switches = 0
+        self._last_two_hand_distance: float | None = None
 
     def start(self) -> None:
         self._thread.start()
@@ -234,7 +250,7 @@ class Eyes:
 
     def interpret_observation(
         self,
-        hand_landmarks: Mapping[int, Point] | None = None,
+        hand_landmarks: Mapping[int, Point] | Sequence[Mapping[int, Point]] | None = None,
         head_pose: HeadPose | None = None,
     ) -> GestureEvent | None:
         return self._interpreter.interpret(hand_landmarks=hand_landmarks, head_pose=head_pose)
@@ -285,16 +301,27 @@ class Eyes:
         hand_landmarks = self._extract_hand_landmarks(self._hands.detect(mp_image))
         head_pose, face_landmarks = self._extract_head_pose(self._face.detect(mp_image) if self._face is not None else None)
 
-        calibration_status = self._process_calibration(hand_landmarks, head_pose)
-        event = None if calibration_status.active else self._interpreter.interpret(hand_landmarks=hand_landmarks, head_pose=head_pose)
+        primary_hand = hand_landmarks[0] if hand_landmarks else None
+        calibration_status = self._process_calibration(primary_hand, head_pose)
+        event = None
+        if not calibration_status.active:
+            event = self._detect_zoom(hand_landmarks)
+            if event is None:
+                event = self._interpreter.interpret(hand_landmarks=hand_landmarks, head_pose=head_pose)
+        else:
+            self._last_two_hand_distance = None
 
         if self._frame_observer is not None:
             preview_points = None
             if hand_landmarks:
-                preview_points = {
-                    index: (int(point.x * processed_frame.shape[1]), int(point.y * processed_frame.shape[0]))
-                    for index, point in hand_landmarks.items()
-                }
+                preview_points = []
+                for hand in hand_landmarks:
+                    preview_points.append(
+                        {
+                            index: (int(point.x * processed_frame.shape[1]), int(point.y * processed_frame.shape[0]))
+                            for index, point in hand.items()
+                        }
+                    )
             preview_face_points = None
             if face_landmarks:
                 preview_face_points = [
@@ -408,11 +435,47 @@ class Eyes:
         self._motion_direction = None
         self._motion_switches = 0
 
-    def _extract_hand_landmarks(self, results) -> Mapping[int, Point] | None:
+    def _detect_zoom(self, hand_landmarks: Sequence[Mapping[int, Point]] | None) -> GestureEvent | None:
+        if not hand_landmarks or len(hand_landmarks) < 2:
+            self._last_two_hand_distance = None
+            return None
+
+        first_center = self._hand_center(hand_landmarks[0])
+        second_center = self._hand_center(hand_landmarks[1])
+        if first_center is None or second_center is None:
+            self._last_two_hand_distance = None
+            return None
+
+        distance = _distance(first_center, second_center)
+        if self._last_two_hand_distance is None:
+            self._last_two_hand_distance = distance
+            return None
+
+        delta = distance - self._last_two_hand_distance
+        self._last_two_hand_distance = distance
+        if abs(delta) < self._zoom_distance_threshold:
+            return None
+        if delta > 0:
+            return GestureEvent(name="zoom_in", action="hotkey", value=self._zoom_hotkey_in)
+        return GestureEvent(name="zoom_out", action="hotkey", value=self._zoom_hotkey_out)
+
+    def _hand_center(self, hand_landmarks: Mapping[int, Point]) -> Point | None:
+        anchors = [hand_landmarks.get(index) for index in (0, 5, 9, 13, 17)]
+        points = [point for point in anchors if point is not None]
+        if not points:
+            return None
+        return Point(
+            x=sum(point.x for point in points) / len(points),
+            y=sum(point.y for point in points) / len(points),
+        )
+
+    def _extract_hand_landmarks(self, results) -> list[Mapping[int, Point]] | None:
         if not getattr(results, "hand_landmarks", None):
             return None
-        first_hand = results.hand_landmarks[0]
-        return {index: Point(x=landmark.x, y=landmark.y) for index, landmark in enumerate(first_hand)}
+        hands: list[Mapping[int, Point]] = []
+        for hand in results.hand_landmarks[: self._max_hands]:
+            hands.append({index: Point(x=landmark.x, y=landmark.y) for index, landmark in enumerate(hand)})
+        return hands or None
 
     def _extract_head_pose(self, results) -> tuple[HeadPose | None, list[Point] | None]:
         if results is None or not getattr(results, "face_landmarks", None):
@@ -448,7 +511,7 @@ class Eyes:
             options = mp.tasks.vision.HandLandmarkerOptions(
                 base_options=base_options,
                 running_mode=mp.tasks.vision.RunningMode.IMAGE,
-                num_hands=1,
+                num_hands=self._max_hands,
                 min_hand_detection_confidence=0.5,
                 min_hand_presence_confidence=0.5,
                 min_tracking_confidence=0.5,

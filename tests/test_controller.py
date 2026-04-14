@@ -1,5 +1,6 @@
 import queue
 import unittest
+from unittest import mock
 
 from actions.controller import ActionController, ActionRequest
 
@@ -51,6 +52,12 @@ class ActionControllerTests(unittest.TestCase):
             self.assertEqual("click", observed.get(timeout=1.0))
         finally:
             controller.stop()
+
+    def test_open_app_resolves_known_windows_path(self) -> None:
+        controller = ActionController(dry_run=False)
+        with mock.patch("actions.controller.os.path.exists", side_effect=lambda value: "brave.exe" in str(value)):
+            resolved = controller._resolve_app_command("brave")
+        self.assertIn("brave.exe", resolved.lower())
 
 
 if __name__ == "__main__":

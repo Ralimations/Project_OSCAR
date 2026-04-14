@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import shutil
 import subprocess
 import sys
@@ -19,8 +20,18 @@ OPENWAKEWORD_ONNX_FILES = [
     ("melspectrogram.onnx", "features/melspectrogram.onnx"),
     ("embedding_model.onnx", "features/embedding_model.onnx"),
 ]
-GEMMA_MODEL_ID = "google/gemma-4-e4b-it"
-GEMMA_TARGET_DIR = "gemma-4-e4b-openvino"
+SMOLLM2_MODEL_ID = "HuggingFaceTB/SmolLM2-360M-Instruct"
+SMOLLM2_TARGET_DIR = "smollm2-360m-instruct-hf"
+SMOLLM2_ALLOW_PATTERNS = [
+    "config.json",
+    "generation_config.json",
+    "model.safetensors",
+    "special_tokens_map.json",
+    "tokenizer.json",
+    "tokenizer_config.json",
+    "merges.txt",
+    "vocab.json",
+]
 
 
 def remove_legacy_models(models_dir: Path) -> None:
@@ -88,15 +99,53 @@ def pull_ollama_model(model_name: str) -> None:
     except subprocess.CalledProcessError as exc:
         print(f"\n[BLOCKED] Ollama pull failed for {model_name}: {exc}\n")
 
+def download_small_local_model(models_dir: Path) -> None:
+    target_dir = models_dir / SMOLLM2_TARGET_DIR
+    if (target_dir / "model.safetensors").exists():
+        print(f"Small local model already present: {target_dir}")
+        return
+    try:
+        from huggingface_hub import snapshot_download
+    except ImportError:
+        print("\n[BLOCKED] huggingface_hub is not available in the embedded runtime.\n")
+        return
+
+    print(f"Downloading local small model {SMOLLM2_MODEL_ID} -> {target_dir}")
+    snapshot_download(
+        repo_id=SMOLLM2_MODEL_ID,
+        local_dir=str(target_dir),
+        allow_patterns=SMOLLM2_ALLOW_PATTERNS,
+    )
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Download OSCAR runtime models.")
+    parser.add_argument(
+        "--skip-ollama",
+        action="store_true",
+        help="Skip Ollama pulls and only download repo-local assets.",
+    )
+    parser.add_argument(
+        "--skip-small-local",
+        action="store_true",
+        help="Skip the bundled small local Transformers model download.",
+    )
+    return parser.parse_args()
+
+
 def main() -> None:
+    args = parse_args()
     models_dir = Path("models")
     models_dir.mkdir(exist_ok=True)
     remove_legacy_models(models_dir)
     download_openwakeword_models(models_dir)
     download_mediapipe_asset(models_dir, "hand_landmarker.task", MEDIAPIPE_HAND_LANDMARKER_URL)
     download_mediapipe_asset(models_dir, "face_landmarker.task", MEDIAPIPE_FACE_LANDMARKER_URL)
-    pull_ollama_model("gemma4:e2b")
-    pull_ollama_model("llama3.2:1b")
+    if not args.skip_small_local:
+        download_small_local_model(models_dir)
+    if not args.skip_ollama:
+        pull_ollama_model("gemma4:e2b")
+        pull_ollama_model("llama3.2:1b")
     print("Model bootstrap completed.")
 
 

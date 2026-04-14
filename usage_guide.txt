@@ -4,7 +4,7 @@ Project O.S.C.A.R. Usage Guide
 What OSCAR Is
 -------------
 OSCAR is an offline desktop assistant designed around a state-machine loop.
-It listens for gesture events and transcript events, routes the request, then executes an OS action or speaks a response.
+It listens for gesture events and transcript events, routes the request through the cheapest reliable path first, then executes an OS action or speaks a response.
 
 Current Control Methods
 -----------------------
@@ -28,13 +28,19 @@ Current Control Methods
 - Index tip and middle tip moving vertically triggers scrolling.
 - Up and down movement maps to mouse wheel scroll values.
 
-3. Head confirmation gestures
+3. Two-hand zoom gesture
+- OSCAR can now track up to two hands in the camera loop.
+- Moving two hands farther apart emits a zoom-in hotkey.
+- Moving two hands closer together emits a zoom-out hotkey.
+- Default mapping is Ctrl + `+` for zoom in and Ctrl + `-` for zoom out.
+
+4. Head confirmation gestures
 - Head nod maps to "yes".
 - Head shake maps to "no".
 - For calibration, these now require strong repeated movement rather than a single pose angle.
 - These are recognized in the gesture interpreter logic, but they are not yet fully consumed by a live approval workflow.
 
-4. Transcript or wake-word path
+5. Transcript or wake-word path
 - OSCAR accepts transcript events through the Ears module.
 - The real wake-word and STT model loading seams exist.
 - The current codebase can process injected transcript events and transcribed audio-file results.
@@ -64,18 +70,19 @@ Current Supported Features
 4. OCR memory route
 - Transcript requests that look historical or text-retrieval oriented are routed to the local OCR database path.
 - Example intent: "What was that email address?"
-- OSCAR queries the local SQLite database configured for Screenpipe-style OCR logs.
+- OSCAR queries the local SQLite database configured for Screenpipe-style OCR logs and speaks the result.
 
 5. Visual route
 - Transcript requests that look visual are routed to the Vision module.
 - Example intent: "Where is the submit button?"
-- OSCAR captures a tactical screenshot, passes it to the visual backend seam, and deletes the temporary image after use.
+- OSCAR captures a tactical screenshot only when a visual request is detected, passes it to the visual backend seam, and deletes the temporary image after use.
 
 6. Brain route
 - If the request is not a direct route, macro route, memory route, or vision route, OSCAR falls back to the Brain module.
 - The Brain enforces strict JSON output before actions are executed.
-- The current local brain planner now supports common structured actions such as speaking, opening apps, typing text, pressing keys, hotkeys, and scroll commands.
-- A true local Llama/OpenVINO backend is still not attached yet.
+- The current planner supports transcript-aware fallback actions such as speaking, opening apps, typing text, pressing keys, hotkeys, and scroll commands.
+- The model path is now treated as a last-resort planner rather than the default path for every request.
+- The default planner profile is now `small_local`, which uses a lightweight local Transformers model for CPU-only laptops.
 
 7. Voice output
 - OSCAR can dispatch a "speak" action.
@@ -108,12 +115,14 @@ How OSCAR Works
 3. Routing order
 - Direct command router first
 - App macro router second
-- Brain route decision third
+- Intent classification third
+- Memory or vision route fourth when needed
+- Brain route last
 
 4. Context gathering
-- Memory route -> OCR database lookup
-- Vision route -> screenshot-based visual query
-- Brain route -> direct plan without external context
+- Memory route -> OCR database lookup only for history-style requests
+- Vision route -> screenshot-based visual query only for visual requests
+- Brain route -> direct plan without heavy context unless a backend explicitly uses it
 
 5. Planning and sanitization
 - Brain builds or receives a JSON action plan.
@@ -135,12 +144,12 @@ How To Install & Run
   ```
 
 2. Download Local Models
-- OSCAR requires offline models (openWakeWord, MediaPipe landmarker models) before it can run.
+- OSCAR requires offline models (openWakeWord, MediaPipe landmarker models, and the small local planner model) before it can run.
 - Execute the bootstrap script to download all necessary assets:
   ```powershell
-  .\tools\python313\python.exe scripts\download_models.py
+  .\tools\python313\python.exe scripts\download_models.py --skip-ollama
   ```
-- Note: The Gemma 4 export step in the script currently fails safely because `optimum-intel` (up to v1.27.0) caps at `transformers<4.58`, while Gemma 4 requires `transformers>=5.0`. This is a known upstream block. All other visual/audio assets will download correctly.
+- This downloads the repo-local `SmolLM2-360M-Instruct` planner model into `models/smollm2-360m-instruct-hf` so OSCAR can run without LM Studio.
 
 3. Start the Orchestrator
 - From the project root, run:
@@ -150,21 +159,18 @@ How To Install & Run
 - On startup, OSCAR now logs a diagnostics banner reporting the availability of model components.
 - active interpreter path
 - wake-word model loaded status
-- whisper model loaded status
 - MediaPipe Tasks availability
 - hand landmarker model presence
 - face landmarker model presence
-- calibration required status
-- vision capture availability
 - voice readiness
-- action dispatch readiness
+- active inference backend
+- active model profile
 
 2. Use gesture control
 - First complete calibration in this order:
 - open hand
 - nod
 - shake
-- tilt head
 - Present a hand to the camera.
 - Pinch thumb and index finger to click.
 - Move index and middle finger vertically to scroll.
@@ -186,15 +192,26 @@ How To Install & Run
 - "open brave and watch the trailer for dune 3"
 - "start recording" while BandLab is the active window
 - "focus address bar" while Brave is the active window
+- "go back"
+- "new tab"
+- "zoom in"
 - "What was that email address?"
 - "Where is the submit button?"
 - "say hello"
+
+5. Transcript harness for fast testing
+- For proof-of-concept testing without live STT, run:
+  ```powershell
+  .\tools\python313\python.exe scripts\transcript_harness.py
+  ```
+- This lets you type transcript commands directly into OSCAR while keeping the same routing path used by Ears.
 
 Configuration Files
 -------------------
 1. config/settings.yaml
 - Runtime settings
 - Gesture thresholds
+- Maximum tracked hands and zoom hotkeys
 - Screenpipe database path
 - Piper executable and model path
 - MediaPipe hand landmarker task path
@@ -216,13 +233,13 @@ Known Current Limits
 --------------------
 1. Real live microphone capture and continuous wake-word audio streaming are not fully wired end-to-end yet.
 2. The visual route has screenshot capture and cleanup, but no live VLM backend is configured by default.
-3. The brain route now has both a deterministic fallback planner and a real local OpenVINO LLM path.
-   The embedded runtime packages and a local model directory at `models/llama` are now installed, so OSCAR can attempt local LLM planning offline.
-4. Head nod and head shake are recognized in logic, but not yet used in a full confirmation UX flow.
-5. Piper speech depends on a valid local Piper executable and model path.
-6. OCR memory retrieval depends on a valid local SQLite OCR database at the configured path.
-7. The downloaded wake-word model currently uses an openWakeWord built-in phrase as a temporary placeholder until a custom OSCAR wake-word model is trained or added.
-8. Head shake calibration is still unreliable and should be treated as an open tuning issue.
+3. The brain route is intentionally no longer the default path for ordinary commands, because CPU-only laptop latency is too high when every request pays for model inference.
+4. The fallback planner still benefits from additional prompt tuning if a local model backend is used.
+5. Head nod and head shake are recognized in logic, but not yet used in a full confirmation UX flow.
+6. Piper speech depends on a valid local Piper executable and model path.
+7. OCR memory retrieval depends on a valid local SQLite OCR database at the configured path.
+8. The downloaded wake-word model currently uses an openWakeWord built-in phrase as a temporary placeholder until a custom OSCAR wake-word model is trained or added.
+9. Head shake calibration is still unreliable and should be treated as an open tuning issue.
 
 Current Lacking Items
 ---------------------
@@ -231,7 +248,7 @@ Current Lacking Items
 3. Live STT needs end-to-end validation with actual speech, latency, and background noise.
 4. Screenpipe OCR route is wired structurally but still needs validation against a real local OCR database.
 5. Vision route still needs a real local VLM backend.
-6. Brain route is now backed by a real local OpenVINO model, but it still needs real-world prompt tuning and behavior validation on your laptop.
+6. Brain route now defaults to a small local Transformers model, but it still needs real-world prompt tuning and behavior validation on your laptop.
 7. Voice route still needs a working local Piper installation and model.
 8. Head shake/no detection is not production-ready yet.
 
@@ -247,7 +264,7 @@ What exists now:
 - App macros
 - OCR route
 - Vision route seam
-- Brain route seam
+- Transcript-aware fallback planner
 - Voice route seam
 - Dependency-ready embedded runtime
 
@@ -255,6 +272,6 @@ What still needs real-world debugging:
 - Model weight paths
 - Microphone and wake-word streaming
 - Faster-Whisper runtime performance
-- Camera behavior and live hand tracking quality on the target laptop
+- Camera behavior, two-hand tracking quality, and zoom gesture stability on the target laptop
 - Automation edge cases on Windows
 - End-to-end latency tuning
